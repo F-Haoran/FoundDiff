@@ -11,6 +11,7 @@ from torch.utils.data import Dataset, DataLoader
 import ipdb
 from . import transforms
 from data.base_dataset import BaseDataset, get_transform
+from data.paths import MAYO2020_AB, MAYO2020_LUNG, MAYO2020_HEAD, MAYO2016, mayo_glob, EXTERNAL_CT
 from PIL import Image
 
 from torch.utils.data import Dataset
@@ -289,6 +290,7 @@ from torch.utils.data import Dataset, DataLoader
 import ipdb
 from . import transforms
 from data.base_dataset import BaseDataset, get_transform
+from data.paths import MAYO2020_AB, MAYO2020_LUNG, MAYO2020_HEAD, MAYO2016, mayo_glob, EXTERNAL_CT
 from PIL import Image
 
 from torch.utils.data import Dataset
@@ -305,7 +307,7 @@ def sorted_list(path):
     return tmplist
 
 class PDFDataset(Dataset):
-    def __init__(self, phase,mode='2020_seen'):
+    def __init__(self, phase, mode='2020_seen', max_test=0):
         #ipdb.set_trace()
         train_transforms,val_transforms=self.get_transforms()
         if 'train' in phase:
@@ -328,16 +330,16 @@ class PDFDataset(Dataset):
         if 'test' in phase:
             stride = 2
         start=0
-        ab_ndct= sorted_list('/mnt/miah203/zhchen/Mayo2020_ab_2d/'+ phase+'/full_1mm/*')[:num]
-        ab_dose_1_2_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_ab_2d/'+phase+'/sim-0.50/*')[start:num:stride]  # dose 1/2
-        ab_dose_1_3_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_ab_2d/'+phase+'/sim-0.33/*')[start:num:stride]  # dose 1/3
-        ab_dose_1_4_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_ab_2d/'+phase+'/quarter_1mm/*')[start:num:stride]  # dose 1/4
-        #ab_dose_1_4_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_ab_2d/'+phase+'/sim-0.25/*')[:num:stride]  # dose 1/4
-        ab_dose_1_5_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_ab_2d/'+phase+'/sim-0.20/*')[start:num:stride]  # dose 1/5
-        ab_dose_1_6_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_ab_2d/'+phase+'/sim-0.17/*')[start:num:stride]  # dose 1/6
-        ab_dose_1_8_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_ab_2d/'+ phase+'/sim-0.12/*')[start:num:stride]  # dose 1/8
-        ab_dose_1_10_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_ab_2d/'+ phase+'/sim-0.10/*')[start:num:stride] # dose 1/10
-        ab_dose_1_20_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_ab_2d/'+ phase+'/sim-0.05/*')[start:num:stride]  # dose 1/20
+        ab_ndct= sorted_list(mayo_glob(MAYO2020_AB, phase, 'full_1mm'))[:num]
+        ab_dose_1_2_list= sorted_list(mayo_glob(MAYO2020_AB, phase, 'sim-0.50'))[start:num:stride]  # dose 1/2
+        ab_dose_1_3_list= sorted_list(mayo_glob(MAYO2020_AB, phase, 'sim-0.33'))[start:num:stride]  # dose 1/3
+        ab_dose_1_4_list= sorted_list(mayo_glob(MAYO2020_AB, phase, 'quarter_1mm'))[start:num:stride]  # dose 1/4
+        #ab_dose_1_4_list= sorted_list(mayo_glob(MAYO2020_AB, phase, 'sim-0.25'))[:num:stride]  # dose 1/4
+        ab_dose_1_5_list= sorted_list(mayo_glob(MAYO2020_AB, phase, 'sim-0.20'))[start:num:stride]  # dose 1/5
+        ab_dose_1_6_list= sorted_list(mayo_glob(MAYO2020_AB, phase, 'sim-0.17'))[start:num:stride]  # dose 1/6
+        ab_dose_1_8_list= sorted_list(mayo_glob(MAYO2020_AB, phase, 'sim-0.12'))[start:num:stride]  # dose 1/8
+        ab_dose_1_10_list= sorted_list(mayo_glob(MAYO2020_AB, phase, 'sim-0.10'))[start:num:stride] # dose 1/10
+        ab_dose_1_20_list= sorted_list(mayo_glob(MAYO2020_AB, phase, 'sim-0.05'))[start:num:stride]  # dose 1/20
 
 
         # self.ab_images_list= ab_dose_1_10_list
@@ -351,16 +353,16 @@ class PDFDataset(Dataset):
         if 'test' in phase:
             stride = 2
 
-        lung_ndct= sorted_list('/mnt/miah203/zhchen/Mayo2020_lung_2d/'+ phase+'/full_1mm/*')[:num]
-        lung_dose_1_2_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_lung_2d/'+phase+'/sim-0.50/*')[start:num:stride]  # dose 1/2
-        lung_dose_1_3_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_lung_2d/'+phase+'/sim-0.33/*')[start:num:stride]  # dose 1/3
-        lung_dose_1_4_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_lung_2d/'+phase+'/sim-0.25/*')[start:num:stride]  # dose 1/4
-        lung_dose_1_5_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_lung_2d/'+phase+'/sim-0.20/*')[start:num:stride]  # dose 1/5
-        lung_dose_1_6_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_lung_2d/'+phase+'/sim-0.17/*')[start:num:stride]  # dose 1/6
-        lung_dose_1_8_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_lung_2d/'+ phase+'/sim-0.12/*')[start:num:stride]  # dose 1/8
-        #lung_dose_1_10_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_lung_2d/'+ phase+'/sim-0.10/*')[:num:stride] # dose 1/10
-        lung_dose_1_10_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_lung_2d/'+ phase+'/quarter_1mm/*')[start:num:stride] # dose 1/10
-        lung_dose_1_20_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_lung_2d/'+ phase+'/sim-0.05/*')[start:num:stride]  # dose 1/20
+        lung_ndct= sorted_list(mayo_glob(MAYO2020_LUNG, phase, 'full_1mm'))[:num]
+        lung_dose_1_2_list= sorted_list(mayo_glob(MAYO2020_LUNG, phase, 'sim-0.50'))[start:num:stride]  # dose 1/2
+        lung_dose_1_3_list= sorted_list(mayo_glob(MAYO2020_LUNG, phase, 'sim-0.33'))[start:num:stride]  # dose 1/3
+        lung_dose_1_4_list= sorted_list(mayo_glob(MAYO2020_LUNG, phase, 'sim-0.25'))[start:num:stride]  # dose 1/4
+        lung_dose_1_5_list= sorted_list(mayo_glob(MAYO2020_LUNG, phase, 'sim-0.20'))[start:num:stride]  # dose 1/5
+        lung_dose_1_6_list= sorted_list(mayo_glob(MAYO2020_LUNG, phase, 'sim-0.17'))[start:num:stride]  # dose 1/6
+        lung_dose_1_8_list= sorted_list(mayo_glob(MAYO2020_LUNG, phase, 'sim-0.12'))[start:num:stride]  # dose 1/8
+        #lung_dose_1_10_list= sorted_list(mayo_glob(MAYO2020_LUNG, phase, 'sim-0.10'))[:num:stride] # dose 1/10
+        lung_dose_1_10_list= sorted_list(mayo_glob(MAYO2020_LUNG, phase, 'quarter_1mm'))[start:num:stride] # dose 1/10
+        lung_dose_1_20_list= sorted_list(mayo_glob(MAYO2020_LUNG, phase, 'sim-0.05'))[start:num:stride]  # dose 1/20
 
 
         # self.lung_images_list=lung_dose_1_10_list
@@ -379,38 +381,52 @@ class PDFDataset(Dataset):
         # head_dose_1_10_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_head_2d/'+ phase+'/sim-0.10/*')[:num:stride] # dose 1/10
         # head_dose_1_20_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_head_2d/'+ phase+'/sim-0.05/*')[:num:stride]  # dose 1/20
 
-        head_ndct= sorted_list('/mnt/miah203/zhchen/Mayo2020_head_2d_2/'+ phase+'/full_1mm/*')[:num]
-        head_dose_1_2_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_head_2d_2/'+phase+'/sim-0.50/*')[:num:stride]  # dose 1/2
-        head_dose_1_3_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_head_2d_2/'+phase+'/sim-0.33/*')[:num:stride]  # dose 1/3
-        #head_dose_1_4_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_head_2d_2/'+phase+'/sim-0.25/*')[:num:stride]  # dose 1/4
-        head_dose_1_4_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_head_2d_2/'+phase+'/quarter_1mm/*')[:num:stride]  # dose 1/4
-        head_dose_1_5_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_head_2d_2/'+phase+'/sim-0.20/*')[:num:stride]  # dose 1/5
-        head_dose_1_6_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_head_2d_2/'+phase+'/sim-0.17/*')[:num:stride]  # dose 1/6
-        head_dose_1_8_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_head_2d_2/'+ phase+'/sim-0.12/*')[:num:stride]  # dose 1/8
-        head_dose_1_10_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_head_2d_2/'+ phase+'/sim-0.10/*')[:num:stride] # dose 1/10
-        head_dose_1_20_list= sorted_list('/mnt/miah203/zhchen/Mayo2020_head_2d_2/'+ phase+'/sim-0.05/*')[:num:stride]  # dose 1/20
+        head_ndct= sorted_list(mayo_glob(MAYO2020_HEAD, phase, 'full_1mm'))[:num]
+        head_dose_1_2_list= sorted_list(mayo_glob(MAYO2020_HEAD, phase, 'sim-0.50'))[:num:stride]  # dose 1/2
+        head_dose_1_3_list= sorted_list(mayo_glob(MAYO2020_HEAD, phase, 'sim-0.33'))[:num:stride]  # dose 1/3
+        #head_dose_1_4_list= sorted_list(mayo_glob(MAYO2020_HEAD, phase, 'sim-0.25'))[:num:stride]  # dose 1/4
+        head_dose_1_4_list= sorted_list(mayo_glob(MAYO2020_HEAD, phase, 'quarter_1mm'))[:num:stride]  # dose 1/4
+        head_dose_1_5_list= sorted_list(mayo_glob(MAYO2020_HEAD, phase, 'sim-0.20'))[:num:stride]  # dose 1/5
+        head_dose_1_6_list= sorted_list(mayo_glob(MAYO2020_HEAD, phase, 'sim-0.17'))[:num:stride]  # dose 1/6
+        head_dose_1_8_list= sorted_list(mayo_glob(MAYO2020_HEAD, phase, 'sim-0.12'))[:num:stride]  # dose 1/8
+        head_dose_1_10_list= sorted_list(mayo_glob(MAYO2020_HEAD, phase, 'sim-0.10'))[:num:stride] # dose 1/10
+        head_dose_1_20_list= sorted_list(mayo_glob(MAYO2020_HEAD, phase, 'sim-0.05'))[:num:stride]  # dose 1/20
 
 
         # self.head_images_list=head_dose_1_10_list
         self.head_images_list=head_dose_1_2_list+head_dose_1_4_list+head_dose_1_6_list+head_dose_1_10_list
         # self.head_images_list=head_dose_1_3_list+head_dose_1_5_list+head_dose_1_8_list+head_dose_1_20_list
 
-        self.mayo16_ldct=sorted_list('/mnt/miah203/zhchen/Mayo2016_2d/quarter_1mm/*')
-        self.mayo16_ndct_path_list=sorted_list('/mnt/miah203/zhchen/Mayo2016_2d/train/full_1mm/*')
+        self.mayo16_ldct=sorted_list(os.path.join(MAYO2016, 'quarter_1mm', '*'))
+        self.mayo16_ndct_path_list=sorted_list(mayo_glob(MAYO2016, 'train', 'full_1mm'))
 
         
 
         #self.q_path_list= dose_1_2_list+dose_1_3_list+dose_1_4_list+dose_1_5_list+dose_1_6_list+dose_1_8_list+dose_1_10_list+dose_1_20_list
         # self.q_path_list= self.ab_images_list +self.lung_images_list+self.head_images_list #+self.mayo16_ldct
         # self.f_path_list= ab_ndct
-        self.q_path_list=head_dose_1_10_list
+        # Author head sim-0.10 eval; IDC Mayo has chest/abdomen quarter-dose only (no head).
+        if mode == 'idc':
+            self.q_path_list = lung_dose_1_10_list + ab_dose_1_4_list
+        elif mode == 'external':
+            ext_q = sorted_list(mayo_glob(EXTERNAL_CT, phase, 'quarter_1mm'))
+            ext_ndct = sorted_list(mayo_glob(EXTERNAL_CT, phase, 'full_1mm'))
+            self.lung_ndct_path_list = ext_ndct
+            self.q_path_list = ext_q
+            self.ab_ndct_path_list = ab_ndct
+            self.head_ndct_path_list = head_ndct
+        else:
+            self.q_path_list=head_dose_1_10_list
+        if max_test and 'test' in phase and self.q_path_list:
+            self.q_path_list = self.q_path_list[:max_test]
         # self.q_path_list = self.q_path_list[:50]
-        if 'test' in phase:
+        if 'test' in phase and mode != 'external':
             self.q_path_list=self.q_path_list
 
-        self.ab_ndct_path_list= ab_ndct
-        self.lung_ndct_path_list= lung_ndct
-        self.head_ndct_path_list= head_ndct
+        if mode != 'external':
+            self.ab_ndct_path_list= ab_ndct
+            self.lung_ndct_path_list= lung_ndct
+            self.head_ndct_path_list= head_ndct
 
         self.A_size = len(self.q_path_list)  # get the size of dataset A
         # self.B_size = len(self.f_path_list)

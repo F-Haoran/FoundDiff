@@ -11,6 +11,7 @@ from torch.utils.data import Dataset, DataLoader
 import ipdb
 from . import transforms
 from data.base_dataset import BaseDataset, get_transform
+from data.paths import MAYO2016, CQ500, mayo_glob
 from PIL import Image
 from torch.utils.data import Dataset
 
@@ -39,13 +40,13 @@ class Mayo16Dataset(Dataset):
             #self.q_path_list=sorted_list('/mnt/miah203/zhchen/Mayo2016_2d/train/quarter_1mm/*') #[0::2]
             #self.f_path_list=sorted_list('/mnt/miah203/zhchen/Mayo2016_2d/train/full_1mm/*') #[0::2]
             #self.q_path_list=sorted_list('/mnt/miah203/zhchen/Mayo2016_2d/test/sim-0.25/*') #[0::2]
-            self.f_path_list = sorted_list('/mnt/miah203/zhchen/CQ500_2d/test/full_1mm/*')
-            self.q_path_list = sorted_list('/mnt/miah203/zhchen/CQ500_2d/test/sim-0.25/*')
+            self.f_path_list = sorted_list(mayo_glob(CQ500, 'test', 'full_1mm'))
+            self.q_path_list = sorted_list(mayo_glob(CQ500, 'test', 'sim-0.25'))
 
         if 'test' in phase:
-            self.q_path_list=sorted_list('/mnt/miah203/zhchen/Mayo2016_2d/test/quarter_1mm/*')
-            # self.q_path_list=sorted_list('/mnt/miah203/zhchen/Mayo2016_2d/test/sim-0.25/*')
-            self.f_path_list=sorted_list('/mnt/miah203/zhchen/Mayo2016_2d/test/full_1mm/*')
+            self.q_path_list=sorted_list(mayo_glob(MAYO2016, 'test', 'quarter_1mm'))
+            # self.q_path_list=sorted_list(mayo_glob(MAYO2016, 'test', 'sim-0.25'))
+            self.f_path_list=sorted_list(mayo_glob(MAYO2016, 'test', 'full_1mm'))
             # self.f_path_list = sorted_list('/mnt/miah203/zhchen/CQ500_2d/test/full_1mm/*')
             # self.q_path_list = sorted_list('/mnt/miah203/zhchen/CQ500_2d/test/sim-0.25/*')
             #self.q_path_list=sorted_list('/mnt/miah203/zhchen/肺科医院/ldct_npy_2d/*')[:2000:2]
