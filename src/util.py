@@ -186,13 +186,20 @@ def correct_resize(t, size, mode=Image.BICUBIC):
 
 
 def compute_ssim(img1, img2, window_size=11, reduction: str = "mean", max_val: float = 1.0, full: bool = False):
+    if img1.ndim == 3:
+        img1 = img1.unsqueeze(1)
+    if img2.ndim == 3:
+        img2 = img2.unsqueeze(1)
     window: torch.Tensor = get_gaussian_kernel2d(
         (window_size, window_size), (1.5, 1.5))
     window = window.requires_grad_(False)
     C1: float = (0.01 * max_val) ** 2
     C2: float = (0.03 * max_val) ** 2
     tmp_kernel: torch.Tensor = window.to(img1)
-    tmp_kernel = torch.unsqueeze(tmp_kernel, dim=0)
+    while tmp_kernel.ndim > 3:
+        tmp_kernel = tmp_kernel.squeeze(0)
+    if tmp_kernel.ndim == 2:
+        tmp_kernel = tmp_kernel.unsqueeze(0)
     # compute local mean per channel
     mu1: torch.Tensor = filter2d(img1, tmp_kernel)
     mu2: torch.Tensor = filter2d(img2, tmp_kernel)

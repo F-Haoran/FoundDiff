@@ -592,7 +592,8 @@ class Unet(nn.Module):
                 param.requires_grad = False
 
             clipiqa=CLIPIQA(model_type='clipiqa+')
-            state_dict=torch.load('Dose-CLIP.pth', map_location='cpu')
+            clip_path = os.path.join(os.path.dirname(__file__), 'DA-CLIP.pth')
+            state_dict = torch.load(clip_path, map_location='cpu')
             clipiqa.load_state_dict(state_dict, strict=True)
             self.dose_encoder=clipiqa
             for param in self.dose_encoder.parameters():
@@ -1576,13 +1577,17 @@ class Trainer(object):
 
         self.condition_type = 2
 
-        val_dataset = PDFDataset(phase='test')
+        val_dataset = PDFDataset(
+            phase='test',
+            mode=getattr(opt, 'data_mode', 'author'),
+            max_test=getattr(opt, 'max_test', 0),
+        )
         #val_dataset = Mayo16Dataset(phase='test')
         self.sample_dataset = val_dataset
         self.sample_loader = cycle(self.accelerator.prepare(DataLoader(self.sample_dataset, batch_size=num_samples, shuffle=True,
                                                                         pin_memory=True, num_workers=4)))  # cpu_count()
 
-        ds =PDFDataset(phase='train512')  
+        ds = PDFDataset(phase='train512', mode=getattr(opt, 'data_mode', 'author'))
         #ds =Mayo16Dataset(phase='train')  
         self.dl = cycle(self.accelerator.prepare(DataLoader(ds, batch_size=train_batch_size,
                         shuffle=True, pin_memory=True, num_workers=4)))
