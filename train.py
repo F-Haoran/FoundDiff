@@ -39,6 +39,10 @@ parser.add_argument('--verbose', action='store_true', help='是否打印详细�
 parser.add_argument('--sampling_timesteps', type=int, default=2, help='采样的时间步数')
 parser.add_argument('--epoch', type=int, default=100, help='采样的时间步数')
 parser.add_argument('--dataset', type=str, default='2020_seen', help='输入文件路径')
+parser.add_argument('--data-mode', type=str, default='idc', choices=['author', 'idc', 'external'],
+                    help='author=head sim-0.10; idc=lung+ab quarter_1mm; external=open nii.gz pairs')
+parser.add_argument('--max-test', type=int, default=0,
+                    help='Limit test slices (0=all). Useful for external/quick runs.')
 parser.add_argument('--train_num_steps', type=int, default=200000, help='train_num_steps')
 parser.add_argument('--train_batch_size', type=int, default=2, help='train_batch_size')
 # 解析命令行参数
@@ -127,6 +131,8 @@ else:
 
 #make_dir(results_folder+'/sample')
 
+
+folder = opt.dataset
 
 trainer = Trainer(
     opt,
