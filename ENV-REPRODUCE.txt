@@ -1,0 +1,167 @@
+FoundDiff 环境复现说明
+======================
+来源环境: conda env FoundDiff @ Python 3.10.20
+机器: Legion R7000, RTX 5060 Laptop (sm_120), 驱动 595-open
+生成日期: 2026-06-12
+
+================================================================================
+一、核心版本（另一台机器优先对齐这些）
+================================================================================
+
+Python              3.10.20
+torch               2.11.0+cu128
+torchvision         0.26.0+cu128
+torchaudio          2.11.0+cu128
+triton              3.6.0
+numpy               2.2.6
+scipy               1.15.3
+kornia              0.6.12
+lpips               0.1.4
+accelerate          1.14.0
+einops              0.8.2
+ema-pytorch         0.7.9
+timm                1.0.27
+matplotlib          3.10.9
+opencv-python       4.13.0.92
+pillow              12.2.0 (conda) / pip 侧随 torch 依赖
+pydicom             3.0.2
+nibabel             5.4.2
+PyWavelets          1.8.0
+tqdm                4.68.1
+ipdb                0.13.13
+
+# Mamba（FoundDiff 必需，需本地编译，无通用 wheel）
+causal-conv1d       1.6.2.post1
+mamba-ssm           2.3.2.post1
+
+# CLIP（openai/CLIP git 安装）
+clip                git+https://github.com/openai/CLIP.git@d05afc436d78f1c48dc0dbf8e5980a9d471f35f6
+
+# 可选（下载 Mayo IDC / 可视化）
+idc-index           0.12.3
+pandas              2.2.3
+scikit-image        0.25.2
+
+# 编译 mamba 时用的 nvcc（conda）
+cuda-nvcc           12.8.61  (conda install -c nvidia)
+
+================================================================================
+二、快速复现（有网，推荐顺序）
+================================================================================
+
+# 1) 创建环境
+conda create -n FoundDiff python=3.10.20 -y
+conda activate FoundDiff
+
+# 2) PyTorch GPU（RTX 50 系必须 cu128；RTX 30/40 可用 cu121/cu124，按 GPU 改）
+pip uninstall -y torch torchvision torchaudio
+pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
+  --index-url https://download.pytorch.org/whl/cu128
+
+# 3) numpy 与 scipy 对齐（避免 pywt/scipy ufunc 报错）
+pip install "numpy>=2.0,<2.3" scipy==1.15.3
+
+# 4) FoundDiff 常用 pip 依赖
+pip install -r requirements-founddiff-pip.txt
+
+# 5) CLIP
+pip install git+https://github.com/openai/CLIP.git
+
+# 6) nvcc（编译 mamba 用；不要用 conda install pytorch 覆盖 pip torch）
+conda install -y -c nvidia cuda-nvcc=12.8
+
+# 7) 编译 mamba（RTX 5060 示例；A100 等改为 8.0）
+export CUDA_HOME="$CONDA_PREFIX"
+export PATH="$CONDA_PREFIX/bin:$PATH"
+export TORCH_CUDA_ARCH_LIST="12.0"
+pip install ninja packaging
+pip install causal-conv1d>=1.2.0 --no-build-isolation
+pip install mamba-ssm --no-build-isolation
+
+# 8) 装完检查 torch 没被换掉
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+python -c "import selective_scan_cuda; print('mamba OK')"
+
+# 9) 若 mamba 安装升级了 torch，重装 torch 再测 mamba
+pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
+  --index-url https://download.pytorch.org/whl/cu128
+
+================================================================================
+三、离线复现
+================================================================================
+
+有网机器:
+  pip download torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
+    --index-url https://download.pytorch.org/whl/cu128 -d wheels/
+  pip download -r requirements-founddiff-pip.txt -d wheels/
+  # mamba/causal-conv1d 需在目标机用 nvcc 编译，或拷贝已编译的 .so wheel
+
+离线机器:
+  conda create -n FoundDiff python=3.10.20 -y
+  conda activate FoundDiff
+  pip install --no-index --find-links=wheels/ torch torchvision torchaudio
+  pip install --no-index --find-links=wheels/ -r requirements-founddiff-pip.txt
+  # 再编译或离线装 mamba wheel
+
+================================================================================
+四、系统要求
+================================================================================
+
+- Linux + NVIDIA 驱动（RTX 5060 需 595+ open 驱动）
+- 不要用 conda install pytorch（会覆盖 pip cu128，导致 CPU 版或 sm_120 失败）
+- FoundDiff 权重: src/DA-CLIP.pth, checkpoints/FoundDiff/sample/model-400.pt
+
+================================================================================
+五、完整 pip 列表
+================================================================================
+
+见同目录:
+  requirements-founddiff-pip.txt   （可 pip install -r，已去掉本地路径）
+  requirements-founddiff-local.txt （本机编译项: mamba/causal-conv1d/clip git）
+  requirements-founddiff-full.txt  （pip freeze 完整输出）
+
+================================================================================
+六、按功能分类的包
+================================================================================
+
+[深度学习核心]
+  torch, torchvision, torchaudio, triton, accelerate, einops, ema-pytorch
+
+[Mamba / FoundDiff 模型]
+  causal-conv1d, mamba-ssm, timm, lpips, kornia, open_clip_torch, clip
+
+[数值 / 图像]
+  numpy, scipy, PyWavelets, scikit-image, opencv-python, pillow, matplotlib
+
+[医学影像 / 数据]
+  pydicom, nibabel, SimpleITK, pandas, pyarrow
+
+[IDC 下载可选]
+  idc-index, idc-index-data, s5cmd, duckdb
+
+[训练日志可选]
+  wandb, sentry-sdk
+
+[调试]
+  ipdb, ipython
+
+[CUDA 编译工具链 conda]
+  cuda-nvcc, cuda-cudart-dev 等 (nvidia channel)
+
+================================================================================
+七、验证命令
+================================================================================
+
+conda activate FoundDiff
+cd /path/to/FoundDiff
+python -c "
+import torch, numpy, scipy, pywt, kornia, lpips
+import selective_scan_cuda
+from src.emamba2 import SS2D
+print('torch', torch.__version__, 'cuda', torch.cuda.is_available())
+print('numpy', numpy.__version__, 'scipy', scipy.__version__)
+print('All imports OK')
+"
+
+CUDA_VISIBLE_DEVICES=0 python train.py --name FoundDiff --epoch 400 \
+  --dataset 2020_seen --data-mode custom --max-test 1
