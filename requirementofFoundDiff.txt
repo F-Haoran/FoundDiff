@@ -1,0 +1,13 @@
+conda create -n FoundDiff python=3.10.20 -y
+conda activate FoundDiff
+
+pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
+  --index-url https://download.pytorch.org/whl/cu128
+
+pip install "numpy>=2.0,<2.3" scipy==1.15.3
+pip install -r requirements-founddiff-pip.txt
+pip install git+https://github.com/openai/CLIP.git
+
+conda install -y -c nvidia cuda-nvcc=12.8
+export TORCH_CUDA_ARCH_LIST="12.0"   # RTX 5060；其它 GPU 改架构
+pip install causal-conv1d>=1.2.0 mamba-ssm --no-build-isolation
