@@ -20,6 +20,15 @@ The data pipeline runs without a GPU:
 - Reconstruct: `python reconstruct_denoised_nifti.py --manifest ... --input-nii ... --denoised-dir ... --output ...` (stacks denoised `.npy` back into a `.nii.gz` using the manifest's z-index map).
 - Visualize: `python view_results.py --data-root <dir> ...`.
 
+### Running the model (train.py test/inference) on the CPU VM
+Inference can be made to run on this CPU-only VM (slow: ~60-70s per 512x512 slice). This was verified end-to-end producing a denoised 3D NIfTI. Requirements:
+1. Weights (downloaded from the README Google Drive folder via `gdown --folder <url>`): place `DA-CLIP.pth` at `src/DA-CLIP.pth` and `model-400.pt` at `checkpoints/FoundDiff/sample/model-400.pt`. These are gitignored (~2.5GB) and persist in the VM snapshot.
+2. A CPU fallback for the mamba kernel: a root-level `selective_scan_cuda.py` providing `fwd(u,delta,A,B,C,D,z,delta_bias,delta_softplus) -> (out, last_state)` implemented as mamba_ssm's reference `selective_scan_ref` (sequential SSM scan in pure PyTorch). `src/emamba2.py` imports it when the CUDA `selective_scan_vmamba`/`mamba_ssm` extensions are absent (it sets `SSMODE="mamba_ssm"`). This file is **gitignored on purpose**: committing it would shadow the real CUDA extension on GPU machines. It persists in the VM snapshot.
+3. Run on CPU: `CUDA_VISIBLE_DEVICES="" python train.py --name FoundDiff --epoch 400 --dataset 2020_seen --data-mode external [--max-test N]`. This reads `data/external/external_2d/test/{quarter_1mm,full_1mm}/lung-*.npy`, writes denoised slices to `checkpoints/FoundDiff/test_final_npy/`, then reconstruct with `reconstruct_denoised_nifti.py` (see below).
+4. `--data-mode external` requires the slice filenames to start with `lung-` (the dataset infers the NDCT list from the `lung` prefix); the external preprocessor already names them that way.
+
+Caveat: the model normalizes HU into a clipped soft-tissue window (`norm = clip((HU-24)/3000, 0, 1)`), so air (~-1000 HU) maps to 0 and is not recovered by the inverse `denorm = norm*3000+24`. Evaluate denoising in this normalized window, not raw-HU mean. The CPU reference scan is numerically equivalent to the CUDA kernel but has no backward (inference only; training still needs a GPU).
+
 ### Gotchas
 - `Preprocess_nifti.py` has **no `if __name__ == "__main__"` guard**, so running it directly is a no-op. Invoke it via `run_external_pipeline.py`, or call its `main()` (it is wired up correctly inside `run_external_pipeline.py`).
 - `Preprocess_custom_nifti.py` does `from data.paths import CUSTOM_2D, CUSTOM_NIFTI`, but those symbols only exist in the **root** `paths.py`, not in `data/paths.py` → `ImportError`. Prefer the external pipeline (`Preprocess_nifti.py` / `run_external_pipeline.py`), which is self-contained.

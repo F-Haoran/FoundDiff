@@ -8,3 +8,12 @@ data/mayo/
 checkpoints/FoundDiff/test_final_npy/
 checkpoints/FoundDiff/test_final*_npy/
 checkpoints/FoundDiff/*_denoised.nii.gz
+# Model weights (downloaded from Google Drive; ~2.5GB)
+_weights_dl/
+src/DA-CLIP.pth
+checkpoints/FoundDiff/sample/model-400.pt
+# CPU mamba fallback shim (must NOT be committed: would shadow real selective_scan_cuda on GPU)
+selective_scan_cuda.py
+# Run logs
+*.log
+_infer_*
