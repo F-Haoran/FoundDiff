@@ -2,25 +2,25 @@
 """
 Stack FoundDiff 2D denoised .npy slices back into a 3D .nii.gz volume.
 
-Must use the same --stride / --max-slices as Preprocess_nifti.py.
-Unprocessed slices (stride gaps) keep values from the input nii.gz.
+Prefer slice_manifest.json from Preprocess_nifti.py (exact z-index mapping).
+Fallback: --stride + sequential lung-00000.npy order.
 
 Example:
   python reconstruct_denoised_nifti.py \\
+    --manifest data/external/external_2d/slice_manifest.json \\
     --input-nii data/external/nifti/case001_low.nii.gz \\
     --denoised-dir checkpoints/FoundDiff/test_final_npy \\
-    --output checkpoints/FoundDiff/case001_denoised.nii.gz \\
-    --stride 1
+    --output checkpoints/FoundDiff/case001_denoised.nii.gz
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from pathlib import Path
 
 import numpy as np
-
 
 HU_MIN = -1000
 HU_MAX = 2000
@@ -29,20 +29,23 @@ HU_RANGE = HU_MAX - HU_MIN
 
 def parse_args():
     p = argparse.ArgumentParser(description="Reconstruct denoised npy slices -> nii.gz")
-    p.add_argument("--input-nii", type=Path, required=True, help="Original noisy nii.gz (for shape/affine)")
+    p.add_argument("--input-nii", type=Path, required=True, help="Original noisy nii.gz (shape/affine)")
     p.add_argument(
         "--denoised-dir",
         type=Path,
         default=Path("checkpoints/FoundDiff/test_final_npy"),
     )
     p.add_argument("--output", type=Path, required=True)
-    p.add_argument("--stride", type=int, default=1, help="Same as Preprocess_nifti.py --stride")
-    p.add_argument("--max-slices", type=int, default=0, help="Same as Preprocess_nifti.py --max-slices (0=all)")
     p.add_argument(
-        "--prefix",
-        default="lung",
-        help="Slice filename prefix (default lung from lung-00000.npy)",
+        "--manifest",
+        type=Path,
+        default=None,
+        help="slice_manifest.json from Preprocess_nifti.py (recommended)",
     )
+    p.add_argument("--volume-name", type=str, default=None, help="Case name in manifest (default: auto from input-nii)")
+    p.add_argument("--stride", type=int, default=1, help="Fallback if no manifest")
+    p.add_argument("--max-slices", type=int, default=0, help="Fallback if no manifest")
+    p.add_argument("--prefix", default="lung", help="Slice filename prefix")
     return p.parse_args()
 
 
@@ -56,12 +59,11 @@ def load_nifti_z_y_x(path: Path) -> tuple[np.ndarray, object]:
     img = nib.load(str(path))
     vol = np.asarray(img.dataobj, dtype=np.float32)
     if vol.ndim == 3:
-        vol = np.transpose(vol, (2, 1, 0))  # z, y, x
+        vol = np.transpose(vol, (2, 1, 0))
     return vol, img
 
 
 def embed_denoised(slice_hu: np.ndarray, denoised_norm: np.ndarray) -> np.ndarray:
-    """Inverse of Preprocess_nifti crop512: paste 512x512 denoised HU into slice."""
     den = denorm_to_hu(np.squeeze(denoised_norm))
     h, w = slice_hu.shape
     out = slice_hu.copy()
@@ -74,7 +76,7 @@ def embed_denoised(slice_hu: np.ndarray, denoised_norm: np.ndarray) -> np.ndarra
     return out
 
 
-def sorted_denoised_files(denoised_dir: Path, prefix: str) -> list[Path]:
+def sorted_denoised_files(denoised_dir: Path, prefix: str) -> list[tuple[int, Path]]:
     pat = re.compile(rf"^{re.escape(prefix)}-(\d+)\.npy$")
     files = []
     for p in denoised_dir.glob("*.npy"):
@@ -82,42 +84,72 @@ def sorted_denoised_files(denoised_dir: Path, prefix: str) -> list[Path]:
         if m:
             files.append((int(m.group(1)), p))
     files.sort(key=lambda x: x[0])
-    return [p for _, p in files]
+    return files
+
+
+def load_manifest_mapping(args) -> list[tuple[str, int]] | None:
+    if args.manifest is None or not args.manifest.is_file():
+        return None
+    with open(args.manifest, encoding="utf-8") as f:
+        data = json.load(f)
+
+    vol_name = args.volume_name
+    if vol_name is None:
+        stem = args.input_nii.name.replace("_low.nii.gz", "").replace(".nii.gz", "")
+        vol_name = stem
+
+    for vol in data.get("volumes", []):
+        if vol.get("name") == vol_name:
+            test_slices = [(s["fname"], int(s["z"])) for s in vol["slices"] if s.get("phase") == "test"]
+            if test_slices:
+                return test_slices
+            return [(s["fname"], int(s["z"])) for s in vol["slices"]]
+    raise SystemExit(f"Volume '{vol_name}' not found in manifest {args.manifest}")
 
 
 def main():
     args = parse_args()
-    denoised = sorted_denoised_files(args.denoised_dir, args.prefix)
-    if not denoised:
-        raise SystemExit(f"No {args.prefix}-*.npy in {args.denoised_dir}")
-
     vol_zyx, ref_img = load_nifti_z_y_x(args.input_nii)
-    nz = vol_zyx.shape[0]
-    if args.max_slices:
-        nz = min(nz, args.max_slices)
-
     out_vol = vol_zyx.copy()
-    n_written = 0
-    for idx, dpath in enumerate(denoised):
-        z = idx * args.stride
-        if z >= nz:
-            break
-        out_vol[z] = embed_denoised(vol_zyx[z], np.load(dpath))
-        n_written += 1
+
+    mapping = load_manifest_mapping(args)
+    if mapping:
+        n_written = 0
+        n_missing = 0
+        for fname, z in mapping:
+            dpath = args.denoised_dir / fname
+            if not dpath.is_file():
+                n_missing += 1
+                continue
+            if z < 0 or z >= out_vol.shape[0]:
+                raise SystemExit(f"Manifest z={z} out of range [0, {out_vol.shape[0]-1}] for {fname}")
+            out_vol[z] = embed_denoised(vol_zyx[z], np.load(dpath))
+            n_written += 1
+        print(f"Manifest slices: {len(mapping)}  denoised written: {n_written}  missing npy: {n_missing}")
+        if n_missing:
+            print("Warning: re-run train.py WITHOUT --max-test to denoise all slices")
+    else:
+        denoised = sorted_denoised_files(args.denoised_dir, args.prefix)
+        if not denoised:
+            raise SystemExit(f"No {args.prefix}-*.npy in {args.denoised_dir}")
+        nz = vol_zyx.shape[0]
+        if args.max_slices:
+            nz = min(nz, args.max_slices)
+        n_written = 0
+        for idx, (_, dpath) in enumerate(denoised):
+            z = idx * args.stride
+            if z >= nz:
+                break
+            out_vol[z] = embed_denoised(vol_zyx[z], np.load(dpath))
+            n_written += 1
+        print(f"Fallback mode: stride={args.stride}  written: {n_written}/{len(denoised)}")
 
     import nibabel as nib
 
     out_xyz = np.transpose(out_vol, (2, 1, 0))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     nib.save(nib.Nifti1Image(out_xyz.astype(np.float32), ref_img.affine, ref_img.header), str(args.output))
-
-    print(f"Input volume Z={vol_zyx.shape[0]}  preprocess cap Z={nz}  stride={args.stride}")
-    print(f"Denoised slices found: {len(denoised)}  written into volume: {n_written}")
-    if n_written < (nz + args.stride - 1) // args.stride:
-        print("Warning: fewer denoised npy than expected — run train.py without --max-test?")
-    if args.stride > 1:
-        print(f"Note: slices between denoised layers still show original noisy HU (stride={args.stride})")
-    print(f"Saved: {args.output}")
+    print(f"Input Z={vol_zyx.shape[0]}  output: {args.output}")
 
 
 if __name__ == "__main__":
