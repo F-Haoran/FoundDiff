@@ -44,7 +44,7 @@ For a Python-only path that reads compressed 3D NIfTI files and writes denoised
 compressed 3D outputs without CUDA:
 ```
 python3 denoise_nifti_gz.py /path/to/case001_low.nii.gz --output /path/to/case001_denoised.nii.gz
-python3 denoise_nifti_gz.py /path/to/*.nii.gz --output-dir /path/to/denoised --method median
+python3 denoise_nifti_gz.py /path/to/*.nii.gz --output-dir /path/to/denoised --method gaussian --sigma 0.8 --passes 3
 ```
 This utility preserves the input affine/header geometry and is intended as a
 CPU-safe denoising baseline. The FoundDiff model path still requires CUDA and

@@ -9,7 +9,7 @@ model. It preserves the input affine and NIfTI header geometry.
 Examples:
   python denoise_nifti_gz.py data/external/nifti/case001_low.nii.gz
   python denoise_nifti_gz.py case001_low.nii.gz --output case001_denoised.nii.gz
-  python denoise_nifti_gz.py *.nii.gz --output-dir denoised --method median
+  python denoise_nifti_gz.py *.nii.gz --output-dir denoised --method median --passes 3
 """
 
 from __future__ import annotations
@@ -49,6 +49,12 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         choices=("gaussian", "median", "nlmeans"),
         default="gaussian",
         help="Denoising method. gaussian/median use SciPy; nlmeans uses scikit-image.",
+    )
+    parser.add_argument(
+        "--passes",
+        type=int,
+        default=1,
+        help="Apply the selected denoising method this many times (default: 1).",
     )
     parser.add_argument(
         "--sigma",
@@ -224,22 +230,31 @@ def denoise_volume(volume: np.ndarray, args: argparse.Namespace) -> np.ndarray:
     cleaned, finite_mask = sanitize_volume(volume)
     cleaned = clip_volume(cleaned, args.clip_min, args.clip_max)
 
+    if args.passes <= 0:
+        raise SystemExit("--passes must be a positive integer")
+
     if args.method == "gaussian":
         sigma = expand_to_rank(parse_numeric_tuple(args.sigma, name="--sigma"), cleaned.ndim)
-        denoised = denoise_gaussian(cleaned, sigma)
+        denoised = cleaned
+        for _ in range(args.passes):
+            denoised = denoise_gaussian(denoised, sigma)
     elif args.method == "median":
         size = expand_to_rank(
             parse_numeric_tuple(args.median_size, name="--median-size", integer=True),
             cleaned.ndim,
         )
-        denoised = denoise_median(cleaned, size)
+        denoised = cleaned
+        for _ in range(args.passes):
+            denoised = denoise_median(denoised, size)
     elif args.method == "nlmeans":
-        denoised = denoise_nlmeans(
-            cleaned,
-            patch_size=args.nlm_patch_size,
-            patch_distance=args.nlm_patch_distance,
-            h=args.nlm_h,
-        )
+        denoised = cleaned
+        for _ in range(args.passes):
+            denoised = denoise_nlmeans(
+                denoised,
+                patch_size=args.nlm_patch_size,
+                patch_distance=args.nlm_patch_distance,
+                h=args.nlm_h,
+            )
     else:
         raise SystemExit(f"Unsupported method: {args.method}")
 
@@ -284,7 +299,7 @@ def denoise_file(input_path: Path, output_path: Path, args: argparse.Namespace) 
     save_nifti_like(denoised, img, output_path)
     print(
         f"{input_path} -> {output_path}\n"
-        f"  shape={volume.shape} method={args.method}\n"
+        f"  shape={volume.shape} method={args.method} passes={args.passes}\n"
         f"  input:  {describe_range(volume)}\n"
         f"  output: {describe_range(denoised)}"
     )
