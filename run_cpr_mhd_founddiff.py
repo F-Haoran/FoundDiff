@@ -80,7 +80,12 @@ class ImageVolume:
 
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Prepare/run/reconstruct FoundDiff for CPR .mhd/.raw volumes.")
-    p.add_argument("inputs", nargs="*", type=Path, help="Optional .mhd/.mha/.raw files. Defaults to --input-dir.")
+    p.add_argument(
+        "inputs",
+        nargs="*",
+        type=Path,
+        help="Optional .mhd/.mha/.raw files. If .mhd and its .raw are both present, only .mhd is processed.",
+    )
     p.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR)
     p.add_argument("--work-root", type=Path, default=DEFAULT_WORK_ROOT, help="FoundDiff external_2d directory.")
     p.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
@@ -145,6 +150,26 @@ def read_mhd_header(path: Path) -> dict[str, str]:
     return header
 
 
+def suffix_lower(path: Path) -> str:
+    return path.suffix.lower()
+
+
+def referenced_raw_path(header_path: Path) -> Path | None:
+    if suffix_lower(header_path) != ".mhd":
+        return None
+    try:
+        header = read_mhd_header(header_path)
+    except OSError:
+        return None
+    raw_name = header.get("ElementDataFile")
+    if not raw_name or raw_name.upper() in {"LOCAL", "LIST"}:
+        return None
+    raw_path = Path(raw_name)
+    if not raw_path.is_absolute():
+        raw_path = header_path.parent / raw_path
+    return raw_path.resolve()
+
+
 def read_mhd_fallback(path: Path) -> ImageVolume:
     header = read_mhd_header(path)
     if "DimSize" not in header or "ElementType" not in header or "ElementDataFile" not in header:
@@ -182,7 +207,7 @@ def read_raw(path: Path, shape: tuple[int, ...], dtype_name: str, spacing: tuple
 
 
 def read_image(path: Path, args: argparse.Namespace) -> ImageVolume:
-    suffix = path.suffix.lower()
+    suffix = suffix_lower(path)
     if suffix == ".raw":
         raw_shape = parse_shape(args.raw_shape, name="--raw-shape")
         if raw_shape is None:
@@ -209,15 +234,42 @@ def read_image(path: Path, args: argparse.Namespace) -> ImageVolume:
         return read_mhd_fallback(path)
 
 
+def image_files_in_dir(input_dir: Path) -> list[Path]:
+    supported = {".mhd", ".mha", ".raw"}
+    return sorted(p for p in input_dir.iterdir() if p.is_file() and suffix_lower(p) in supported)
+
+
+def normalize_input_paths(paths: list[Path], *, allow_raw_only: bool) -> list[Path]:
+    header_paths = [p for p in paths if suffix_lower(p) in {".mhd", ".mha"}]
+    referenced_raws = {raw for p in header_paths if (raw := referenced_raw_path(p)) is not None}
+    normalized = list(header_paths)
+
+    for path in paths:
+        if suffix_lower(path) != ".raw":
+            continue
+        resolved = path.resolve()
+        if resolved in referenced_raws:
+            print(f"Skip paired raw file because its .mhd header will read it: {path}")
+            continue
+        if allow_raw_only:
+            normalized.append(path)
+        else:
+            print(f"Skip raw-only file without --raw-shape: {path}")
+
+    if not normalized and paths:
+        raise SystemExit("Only raw files were found. Pass --raw-shape Z,Y,X --raw-dtype <dtype> for raw-only input.")
+    return normalized
+
+
 def find_inputs(args: argparse.Namespace) -> list[Path]:
     if args.inputs:
         paths = [p.expanduser().resolve() for p in args.inputs]
     else:
         input_dir = args.input_dir.expanduser().resolve()
-        paths = sorted(input_dir.glob("*.mhd")) + sorted(input_dir.glob("*.mha"))
-        if args.raw_shape:
-            mhd_stems = {p.stem for p in paths}
-            paths.extend(p for p in sorted(input_dir.glob("*.raw")) if p.stem not in mhd_stems)
+        if not input_dir.is_dir():
+            raise SystemExit(f"Input directory not found: {input_dir}")
+        paths = image_files_in_dir(input_dir)
+    paths = normalize_input_paths(paths, allow_raw_only=args.raw_shape is not None)
     if not paths:
         raise SystemExit(f"No .mhd/.mha inputs found in {args.input_dir}")
     for path in paths:
@@ -308,7 +360,7 @@ def prepare_external_layout(args: argparse.Namespace) -> Path:
             "name": volume.name,
             "input_path": str(path),
             "shape": list(volume.array.shape),
-            "raw_dtype": args.raw_dtype if path.suffix.lower() == ".raw" else None,
+            "raw_dtype": args.raw_dtype if suffix_lower(path) == ".raw" else None,
             "spacing": list(volume.spacing) if volume.spacing else None,
             "origin": list(volume.origin) if volume.origin else None,
             "direction": list(volume.direction) if volume.direction else None,
@@ -439,7 +491,7 @@ def reconstruct_outputs(args: argparse.Namespace) -> None:
 
     for vol in manifest.get("volumes", []):
         input_path = Path(vol["input_path"])
-        if input_path.suffix.lower() == ".raw" and args.raw_shape is None:
+        if suffix_lower(input_path) == ".raw" and args.raw_shape is None:
             ref = read_raw(
                 input_path,
                 tuple(int(v) for v in vol["shape"]),
