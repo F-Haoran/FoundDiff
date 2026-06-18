@@ -5,7 +5,7 @@ Run FoundDiff on CPR MetaImage volumes (.mhd/.raw).
 The FoundDiff model consumes 2D .npy slices from the repository's external
 dataset layout. This script converts CPR .mhd/.raw volumes to that layout,
 optionally runs FoundDiff inference, and reconstructs denoised slices back to a
-3D .mhd/.raw volume.
+3D MetaImage volume in the same container format as the input.
 
 Typical CUDA machine usage:
   python3 run_cpr_mhd_founddiff.py --slice-axis z
@@ -72,6 +72,7 @@ class ImageVolume:
     name: str
     path: Path
     array: np.ndarray
+    dtype: np.dtype
     spacing: tuple[float, ...] | None = None
     origin: tuple[float, ...] | None = None
     direction: tuple[float, ...] | None = None
@@ -98,7 +99,11 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--prefix", default="lung", help="Slice filename prefix; keep 'lung' for FoundDiff labels.")
     p.add_argument("--clean", action="store_true", help="Remove previous prepared external_2d files first.")
     p.add_argument("--prepare-only", action="store_true", help="Only create FoundDiff 2D input layout.")
-    p.add_argument("--reconstruct-only", action="store_true", help="Only reconstruct .mhd from existing FoundDiff .npy outputs.")
+    p.add_argument(
+        "--reconstruct-only",
+        action="store_true",
+        help="Only reconstruct MetaImage output from existing FoundDiff .npy outputs.",
+    )
     p.add_argument("--skip-inference", action="store_true", help="Prepare and reconstruct, but do not call train.py.")
     p.add_argument("--name", default="FoundDiff", help="Checkpoint name under checkpoints/.")
     p.add_argument("--epoch", default="400", help="Checkpoint epoch to load, e.g. 400.")
@@ -189,11 +194,12 @@ def read_mhd_fallback(path: Path) -> ImageVolume:
     expected = int(np.prod(dims_xyz))
     if data.size != expected:
         raise SystemExit(f"{raw_path} has {data.size} values; expected {expected} from {path}")
+    native_dtype = dtype.newbyteorder("=")
     array = data.reshape(tuple(reversed(dims_xyz))).astype(np.float32, copy=False)
     spacing = tuple(float(v) for v in header.get("ElementSpacing", "").split()) or None
     origin = tuple(float(v) for v in header.get("Offset", header.get("Position", "")).split()) or None
     direction = tuple(float(v) for v in header.get("TransformMatrix", "").split()) or None
-    return ImageVolume(path.stem, path, array, spacing=spacing, origin=origin, direction=direction)
+    return ImageVolume(path.stem, path, array, dtype=np.dtype(native_dtype), spacing=spacing, origin=origin, direction=direction)
 
 
 def read_raw(path: Path, shape: tuple[int, ...], dtype_name: str, spacing: tuple[float, ...] | None) -> ImageVolume:
@@ -203,7 +209,7 @@ def read_raw(path: Path, shape: tuple[int, ...], dtype_name: str, spacing: tuple
     if data.size != expected:
         raise SystemExit(f"{path} has {data.size} values; expected {expected} from --raw-shape")
     array = data.reshape(shape).astype(np.float32, copy=False)
-    return ImageVolume(path.stem, path, array, spacing=spacing)
+    return ImageVolume(path.stem, path, array, dtype=np.dtype(dtype), spacing=spacing)
 
 
 def read_image(path: Path, args: argparse.Namespace) -> ImageVolume:
@@ -218,11 +224,13 @@ def read_image(path: Path, args: argparse.Namespace) -> ImageVolume:
         import SimpleITK as sitk
 
         img = sitk.ReadImage(str(path))
-        array = sitk.GetArrayFromImage(img).astype(np.float32, copy=False)
+        original_array = sitk.GetArrayFromImage(img)
+        array = original_array.astype(np.float32, copy=False)
         return ImageVolume(
             path.stem,
             path,
             array,
+            dtype=np.dtype(original_array.dtype),
             spacing=tuple(img.GetSpacing()),
             origin=tuple(img.GetOrigin()),
             direction=tuple(img.GetDirection()),
@@ -443,10 +451,23 @@ def embed_slice(original: np.ndarray, denoised512: np.ndarray, crop: dict[str, i
     return out
 
 
-def write_mhd_fallback(path: Path, array: np.ndarray, spacing: Iterable[float] | None = None) -> None:
+def cast_to_dtype(array: np.ndarray, dtype: np.dtype) -> np.ndarray:
+    dtype = np.dtype(dtype).newbyteorder("=")
+    if np.issubdtype(dtype, np.integer):
+        info = np.iinfo(dtype)
+        return np.clip(np.rint(array), info.min, info.max).astype(dtype, copy=False)
+    return array.astype(dtype, copy=False)
+
+
+def write_mhd_fallback(
+    path: Path,
+    array: np.ndarray,
+    dtype: np.dtype,
+    spacing: Iterable[float] | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     raw_path = path.with_suffix(".raw")
-    data = array.astype(np.float32, copy=False)
+    data = cast_to_dtype(array, dtype)
     data.tofile(raw_path)
     dims_xyz = " ".join(str(v) for v in reversed(data.shape))
     spacing_values = tuple(spacing) if spacing else tuple(1.0 for _ in range(data.ndim))
@@ -463,23 +484,33 @@ def write_mhd_fallback(path: Path, array: np.ndarray, spacing: Iterable[float] |
         f.write("Offset = " + " ".join("0" for _ in range(data.ndim)) + "\n")
         f.write(f"ElementSpacing = {spacing_text}\n")
         f.write(f"DimSize = {dims_xyz}\n")
-        f.write("ElementType = MET_FLOAT\n")
+        f.write(f"ElementType = {NUMPY_TO_MHD.get(np.dtype(data.dtype), 'MET_FLOAT')}\n")
         f.write(f"ElementDataFile = {raw_path.name}\n")
 
 
 def write_image(path: Path, array: np.ndarray, ref: ImageVolume) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    data = cast_to_dtype(array, ref.dtype)
     try:
         import SimpleITK as sitk
 
-        out_img = sitk.GetImageFromArray(array.astype(np.float32, copy=False))
+        out_img = sitk.GetImageFromArray(data)
         if ref.sitk_image is not None and tuple(ref.array.shape) == tuple(array.shape):
             out_img.CopyInformation(ref.sitk_image)
         elif ref.spacing and len(ref.spacing) == array.ndim:
             out_img.SetSpacing(tuple(float(v) for v in ref.spacing))
         sitk.WriteImage(out_img, str(path))
     except ImportError:
-        write_mhd_fallback(path, array, ref.spacing)
+        write_mhd_fallback(path, array, ref.dtype, ref.spacing)
+
+
+def output_path_for_volume(args: argparse.Namespace, vol: dict, ref: ImageVolume) -> Path:
+    suffix = suffix_lower(ref.path)
+    if suffix == ".mha":
+        extension = ".mha"
+    else:
+        extension = ".mhd"
+    return args.output_dir / f"{vol['name']}{args.output_suffix}{extension}"
 
 
 def reconstruct_outputs(args: argparse.Namespace) -> None:
@@ -513,7 +544,7 @@ def reconstruct_outputs(args: argparse.Namespace) -> None:
             restored = embed_slice(original_slice, denoised, item["crop"])
             put_slice(out_array, axis, int(item["index"]), restored)
             written += 1
-        out_path = args.output_dir / f"{vol['name']}{args.output_suffix}.mhd"
+        out_path = output_path_for_volume(args, vol, ref)
         write_image(out_path, out_array, ref)
         print(f"Reconstructed {out_path}  written={written} missing={missing}")
         if missing:
