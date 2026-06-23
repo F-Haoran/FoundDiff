@@ -3,9 +3,10 @@
 Run FoundDiff on CPR MetaImage volumes (.mhd/.raw).
 
 The FoundDiff model consumes 2D .npy slices from the repository's external
-dataset layout. This script converts CPR .mhd/.raw volumes to that layout,
-optionally runs FoundDiff inference, and reconstructs denoised slices back to a
-3D MetaImage volume in the same container format as the input.
+dataset layout. This script only handles CPR I/O, slicing direction, intensity
+restoration, and reconstruction. The denoising step itself still calls the
+original FoundDiff inference path in train.py and uses the configured FoundDiff
+checkpoint weights.
 
 Typical CUDA machine usage:
   python3 run_cpr_mhd_founddiff.py --slice-axis z
@@ -14,6 +15,10 @@ For CPR volumes stored as (z, angular, linear), use:
   --slice-axis z        denoise each angular-vs-linear CPR plane
   --slice-axis angular  denoise z-vs-linear planes
   --slice-axis linear   denoise z-vs-angular planes
+
+Note: --slice-axis angular does not add a new rotation/shearing correction
+algorithm. It fixes one angular index at a time and sends the resulting
+z-vs-linear 2D plane through FoundDiff.
 
 If you only have a .raw file without a .mhd header, also pass:
   --raw-shape Z,Y,X --raw-dtype float32
@@ -147,9 +152,12 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--intensity-match",
-        choices=("mean-ratio", "none"),
-        default="mean-ratio",
-        help="Match denoised CPR slice brightness to the original ROI. mean-ratio preserves average intensity.",
+        choices=("minmax", "mean-ratio", "none"),
+        default="minmax",
+        help=(
+            "Match denoised CPR slice intensity to the original ROI. "
+            "minmax preserves darkest/brightest ROI values; mean-ratio preserves average intensity."
+        ),
     )
     return p.parse_args(argv)
 
@@ -481,6 +489,9 @@ def run_founddiff(args: argparse.Namespace) -> None:
         if not weight.is_file():
             raise SystemExit(f"Missing FoundDiff weight: {weight}")
 
+    # The CPR-specific code stops before this point: it only prepares external
+    # 2D slices. Denoising below is the original FoundDiff inference path and
+    # uses the requested checkpoint weights.
     cmd = [
         sys.executable,
         str(ROOT / "train.py"),
@@ -555,21 +566,18 @@ def finite_abs_mean(values: np.ndarray) -> float | None:
     return float(np.abs(finite).mean())
 
 
-def match_intensity_to_original(
-    denoised512: np.ndarray,
-    original_slice: np.ndarray,
-    crop: dict[str, int],
-    mode: str,
-) -> np.ndarray:
-    if mode == "none":
-        return denoised512
-    if mode != "mean-ratio":
-        raise SystemExit(f"Unsupported --intensity-match: {mode}")
+def finite_min_max(values: np.ndarray) -> tuple[float, float] | None:
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    return float(finite.min()), float(finite.max())
 
-    sy, sx, dy, dx = crop["src_y"], crop["src_x"], crop["dst_y"], crop["dst_x"]
-    sh, sw = crop["sh"], crop["sw"]
-    original_roi = original_slice[sy : sy + sh, sx : sx + sw]
-    denoised_roi = denoised512[dy : dy + sh, dx : dx + sw]
+
+def match_mean_ratio(
+    denoised512: np.ndarray,
+    original_roi: np.ndarray,
+    denoised_roi: np.ndarray,
+) -> np.ndarray:
     original_mean = finite_mean(original_roi)
     denoised_mean = finite_mean(denoised_roi)
     if original_mean is None or denoised_mean is None:
@@ -590,6 +598,39 @@ def match_intensity_to_original(
             return denoised512 * np.float32(original_abs_mean / denoised_abs_mean)
         return denoised512 + (original_mean - denoised_mean)
     return denoised512 * np.float32(ratio)
+
+
+def match_intensity_to_original(
+    denoised512: np.ndarray,
+    original_slice: np.ndarray,
+    crop: dict[str, int],
+    mode: str,
+) -> np.ndarray:
+    if mode == "none":
+        return denoised512
+    if mode not in {"minmax", "mean-ratio"}:
+        raise SystemExit(f"Unsupported --intensity-match: {mode}")
+
+    sy, sx, dy, dx = crop["src_y"], crop["src_x"], crop["dst_y"], crop["dst_x"]
+    sh, sw = crop["sh"], crop["sw"]
+    original_roi = original_slice[sy : sy + sh, sx : sx + sw]
+    denoised_roi = denoised512[dy : dy + sh, dx : dx + sw]
+
+    if mode == "mean-ratio":
+        return match_mean_ratio(denoised512, original_roi, denoised_roi)
+
+    original_bounds = finite_min_max(original_roi)
+    denoised_bounds = finite_min_max(denoised_roi)
+    if original_bounds is None or denoised_bounds is None:
+        return denoised512
+    original_min, original_max = original_bounds
+    denoised_min, denoised_max = denoised_bounds
+    denoised_range = denoised_max - denoised_min
+    original_range = original_max - original_min
+    if denoised_range <= 1e-6 or original_range <= 1e-6:
+        return match_mean_ratio(denoised512, original_roi, denoised_roi)
+
+    return (denoised512 - np.float32(denoised_min)) * np.float32(original_range / denoised_range) + np.float32(original_min)
 
 
 def cast_to_dtype(array: np.ndarray, dtype: np.dtype) -> np.ndarray:
