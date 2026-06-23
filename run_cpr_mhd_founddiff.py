@@ -113,6 +113,14 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--raw-dtype", default="float32", help="NumPy dtype for raw-only input.")
     p.add_argument("--raw-spacing", default=None, help="Optional raw-only spacing in X,Y,Z order for output header.")
     p.add_argument(
+        "--output-dtype",
+        default="auto",
+        help=(
+            "Output pixel dtype: auto, input, or a NumPy dtype such as float32/int16. "
+            "auto preserves input dtype unless unsigned input would lose negative values."
+        ),
+    )
+    p.add_argument(
         "--model-output-scale",
         choices=("founddiff-hu", "identity", "unit"),
         default="founddiff-hu",
@@ -459,6 +467,22 @@ def cast_to_dtype(array: np.ndarray, dtype: np.dtype) -> np.ndarray:
     return array.astype(dtype, copy=False)
 
 
+def resolve_output_dtype(array: np.ndarray, input_dtype: np.dtype, requested: str) -> np.dtype:
+    input_dtype = np.dtype(input_dtype).newbyteorder("=")
+    requested = requested.lower()
+    if requested == "input":
+        return input_dtype
+    if requested != "auto":
+        try:
+            return np.dtype(requested)
+        except TypeError as exc:
+            raise SystemExit(f"Unsupported --output-dtype: {requested}") from exc
+
+    if np.issubdtype(input_dtype, np.unsignedinteger) and np.nanmin(array) < 0:
+        return np.dtype(np.float32)
+    return input_dtype
+
+
 def write_mhd_fallback(
     path: Path,
     array: np.ndarray,
@@ -488,9 +512,9 @@ def write_mhd_fallback(
         f.write(f"ElementDataFile = {raw_path.name}\n")
 
 
-def write_image(path: Path, array: np.ndarray, ref: ImageVolume) -> None:
+def write_image(path: Path, array: np.ndarray, ref: ImageVolume, output_dtype: np.dtype) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = cast_to_dtype(array, ref.dtype)
+    data = cast_to_dtype(array, output_dtype)
     try:
         import SimpleITK as sitk
 
@@ -501,7 +525,7 @@ def write_image(path: Path, array: np.ndarray, ref: ImageVolume) -> None:
             out_img.SetSpacing(tuple(float(v) for v in ref.spacing))
         sitk.WriteImage(out_img, str(path))
     except ImportError:
-        write_mhd_fallback(path, array, ref.dtype, ref.spacing)
+        write_mhd_fallback(path, array, output_dtype, ref.spacing)
 
 
 def output_path_for_volume(args: argparse.Namespace, vol: dict, ref: ImageVolume) -> Path:
@@ -545,8 +569,9 @@ def reconstruct_outputs(args: argparse.Namespace) -> None:
             put_slice(out_array, axis, int(item["index"]), restored)
             written += 1
         out_path = output_path_for_volume(args, vol, ref)
-        write_image(out_path, out_array, ref)
-        print(f"Reconstructed {out_path}  written={written} missing={missing}")
+        output_dtype = resolve_output_dtype(out_array, ref.dtype, args.output_dtype)
+        write_image(out_path, out_array, ref, output_dtype)
+        print(f"Reconstructed {out_path}  written={written} missing={missing} dtype={output_dtype}")
         if missing:
             print("Warning: missing denoised .npy files; rerun FoundDiff without --max-test if needed.")
 
