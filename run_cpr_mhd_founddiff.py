@@ -132,7 +132,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         default="auto",
         help=(
             "Output pixel dtype: auto, input, or a NumPy dtype such as float32/int16. "
-            "auto preserves input dtype unless unsigned input would lose negative values."
+            "auto preserves input dtype unless unsigned input would lose negative values; "
+            "then it uses int16 when possible for easier viewing."
         ),
     )
     p.add_argument(
@@ -611,8 +612,20 @@ def resolve_output_dtype(array: np.ndarray, input_dtype: np.dtype, requested: st
             raise SystemExit(f"Unsupported --output-dtype: {requested}") from exc
 
     if np.issubdtype(input_dtype, np.unsignedinteger) and np.nanmin(array) < 0:
+        int16 = np.dtype(np.int16)
+        info = np.iinfo(int16)
+        finite = array[np.isfinite(array)]
+        if finite.size and finite.min() >= info.min and finite.max() <= info.max:
+            return int16
         return np.dtype(np.float32)
     return input_dtype
+
+
+def describe_array(values: np.ndarray) -> str:
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return "all non-finite"
+    return f"min={finite.min():.3f} max={finite.max():.3f} mean={finite.mean():.3f}"
 
 
 def write_mhd_fallback(
@@ -704,7 +717,10 @@ def reconstruct_outputs(args: argparse.Namespace) -> None:
         out_path = output_path_for_volume(args, vol, ref)
         output_dtype = resolve_output_dtype(out_array, ref.dtype, args.output_dtype)
         write_image(out_path, out_array, ref, output_dtype)
-        print(f"Reconstructed {out_path}  written={written} missing={missing} dtype={output_dtype}")
+        print(
+            f"Reconstructed {out_path}  written={written} missing={missing} "
+            f"dtype={output_dtype}  intensity: {describe_array(out_array)}"
+        )
         if missing:
             print("Warning: missing denoised .npy files; rerun FoundDiff without --max-test if needed.")
 
