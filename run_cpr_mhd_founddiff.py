@@ -144,6 +144,12 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
             "slice-range maps [0,1] outputs back to each original CPR slice range."
         ),
     )
+    p.add_argument(
+        "--intensity-match",
+        choices=("mean-ratio", "none"),
+        default="mean-ratio",
+        help="Match denoised CPR slice brightness to the original ROI. mean-ratio preserves average intensity.",
+    )
     return p.parse_args(argv)
 
 
@@ -534,6 +540,57 @@ def embed_slice(original: np.ndarray, denoised512: np.ndarray, crop: dict[str, i
     return out
 
 
+def finite_mean(values: np.ndarray) -> float | None:
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    return float(finite.mean())
+
+
+def finite_abs_mean(values: np.ndarray) -> float | None:
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    return float(np.abs(finite).mean())
+
+
+def match_intensity_to_original(
+    denoised512: np.ndarray,
+    original_slice: np.ndarray,
+    crop: dict[str, int],
+    mode: str,
+) -> np.ndarray:
+    if mode == "none":
+        return denoised512
+    if mode != "mean-ratio":
+        raise SystemExit(f"Unsupported --intensity-match: {mode}")
+
+    sy, sx, dy, dx = crop["src_y"], crop["src_x"], crop["dst_y"], crop["dst_x"]
+    sh, sw = crop["sh"], crop["sw"]
+    original_roi = original_slice[sy : sy + sh, sx : sx + sw]
+    denoised_roi = denoised512[dy : dy + sh, dx : dx + sw]
+    original_mean = finite_mean(original_roi)
+    denoised_mean = finite_mean(denoised_roi)
+    if original_mean is None or denoised_mean is None:
+        return denoised512
+
+    if abs(denoised_mean) < 1e-6:
+        original_abs_mean = finite_abs_mean(original_roi)
+        denoised_abs_mean = finite_abs_mean(denoised_roi)
+        if original_abs_mean is not None and denoised_abs_mean is not None and denoised_abs_mean >= 1e-6:
+            return denoised512 * np.float32(original_abs_mean / denoised_abs_mean)
+        return denoised512 + (original_mean - denoised_mean)
+
+    ratio = original_mean / denoised_mean
+    if not np.isfinite(ratio) or ratio <= 0:
+        original_abs_mean = finite_abs_mean(original_roi)
+        denoised_abs_mean = finite_abs_mean(denoised_roi)
+        if original_abs_mean is not None and denoised_abs_mean is not None and denoised_abs_mean >= 1e-6:
+            return denoised512 * np.float32(original_abs_mean / denoised_abs_mean)
+        return denoised512 + (original_mean - denoised_mean)
+    return denoised512 * np.float32(ratio)
+
+
 def cast_to_dtype(array: np.ndarray, dtype: np.dtype) -> np.ndarray:
     dtype = np.dtype(dtype).newbyteorder("=")
     if np.issubdtype(dtype, np.integer):
@@ -640,6 +697,7 @@ def reconstruct_outputs(args: argparse.Namespace) -> None:
                 continue
             original_slice = get_slice(ref.array, axis, int(item["index"]))
             denoised = model_output_to_values(np.load(den_path), args.model_output_scale, original_slice, item["crop"])
+            denoised = match_intensity_to_original(denoised, original_slice, item["crop"], args.intensity_match)
             restored = embed_slice(original_slice, denoised, item["crop"])
             put_slice(out_array, axis, int(item["index"]), restored)
             written += 1
