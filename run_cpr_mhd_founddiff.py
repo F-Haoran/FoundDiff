@@ -107,7 +107,22 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--skip-inference", action="store_true", help="Prepare and reconstruct, but do not call train.py.")
     p.add_argument("--name", default="FoundDiff", help="Checkpoint name under checkpoints/.")
     p.add_argument("--epoch", default="400", help="Checkpoint epoch to load, e.g. 400.")
-    p.add_argument("--gpu", default=os.environ.get("CUDA_VISIBLE_DEVICES", "0"))
+    p.add_argument(
+        "--gpu",
+        default="auto",
+        help="GPU id for FoundDiff inference. Default 'auto' selects the GPU with the most free memory.",
+    )
+    p.add_argument(
+        "--train-batch-size",
+        type=int,
+        default=1,
+        help="Batch size passed to train.py initialization; keep 1 on 24GB GPUs for safer inference.",
+    )
+    p.add_argument(
+        "--cuda-alloc-conf",
+        default="expandable_segments:True,max_split_size_mb:128",
+        help="PYTORCH_CUDA_ALLOC_CONF used during FoundDiff inference.",
+    )
     p.add_argument("--max-test", type=int, default=0, help="Pass through to train.py; 0 means all prepared slices.")
     p.add_argument("--raw-shape", default=None, help="Required for raw-only input, in Z,Y,X or Y,X order.")
     p.add_argument("--raw-dtype", default="float32", help="NumPy dtype for raw-only input.")
@@ -415,6 +430,42 @@ def prepare_external_layout(args: argparse.Namespace) -> Path:
     return args.manifest
 
 
+def resolve_gpu(requested: str) -> str:
+    requested = str(requested).strip()
+    if requested.lower() != "auto":
+        return requested
+
+    try:
+        output = subprocess.check_output(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,memory.free",
+                "--format=csv,noheader,nounits",
+            ],
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        print(f"Warning: could not query nvidia-smi for --gpu auto ({exc}); using GPU 0")
+        return "0"
+
+    candidates: list[tuple[int, int]] = []
+    for line in output.splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 2:
+            continue
+        try:
+            candidates.append((int(parts[0]), int(parts[1])))
+        except ValueError:
+            continue
+    if not candidates:
+        print("Warning: no GPUs parsed from nvidia-smi; using GPU 0")
+        return "0"
+
+    gpu_index, free_mb = max(candidates, key=lambda item: item[1])
+    print(f"Auto GPU selection: GPU {gpu_index} has the most free memory ({free_mb} MiB)")
+    return str(gpu_index)
+
+
 def run_founddiff(args: argparse.Namespace) -> None:
     for weight in (ROOT / "src" / "DA-CLIP.pth", ROOT / "checkpoints" / args.name / "sample" / f"model-{args.epoch}.pt"):
         if not weight.is_file():
@@ -431,11 +482,18 @@ def run_founddiff(args: argparse.Namespace) -> None:
         "2020_seen",
         "--data-mode",
         "external",
+        "--train_batch_size",
+        str(args.train_batch_size),
     ]
     if args.max_test:
         cmd.extend(["--max-test", str(args.max_test)])
+    gpu = resolve_gpu(args.gpu)
     env = os.environ.copy()
-    env["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+    env["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    env["CUDA_VISIBLE_DEVICES"] = gpu
+    env["PYTORCH_CUDA_ALLOC_CONF"] = args.cuda_alloc_conf
+    print("Selected GPU:", gpu)
+    print("PYTORCH_CUDA_ALLOC_CONF:", env["PYTORCH_CUDA_ALLOC_CONF"])
     print(">> " + " ".join(cmd))
     subprocess.run(cmd, cwd=ROOT, env=env, check=True)
 
@@ -580,6 +638,8 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = parse_args(argv)
     if args.stride <= 0:
         raise SystemExit("--stride must be positive")
+    if args.train_batch_size <= 0:
+        raise SystemExit("--train-batch-size must be positive")
     if args.manifest == DEFAULT_MANIFEST and args.work_root != DEFAULT_WORK_ROOT:
         args.manifest = args.work_root / "slice_manifest.json"
 
