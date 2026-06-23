@@ -137,9 +137,12 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--model-output-scale",
-        choices=("founddiff-hu", "identity", "unit"),
-        default="founddiff-hu",
-        help="How to convert FoundDiff .npy values before writing .mhd.",
+        choices=("slice-range", "founddiff-hu", "identity", "unit"),
+        default="slice-range",
+        help=(
+            "How to convert FoundDiff .npy values before writing output. "
+            "slice-range maps [0,1] outputs back to each original CPR slice range."
+        ),
     )
     return p.parse_args(argv)
 
@@ -498,8 +501,22 @@ def run_founddiff(args: argparse.Namespace) -> None:
     subprocess.run(cmd, cwd=ROOT, env=env, check=True)
 
 
-def model_output_to_values(output: np.ndarray, scale: str) -> np.ndarray:
+def model_output_to_values(
+    output: np.ndarray,
+    scale: str,
+    original_slice: np.ndarray,
+    crop: dict[str, int],
+) -> np.ndarray:
     arr = np.squeeze(output).astype(np.float32)
+    if scale == "slice-range":
+        sy, sx = crop["src_y"], crop["src_x"]
+        sh, sw = crop["sh"], crop["sw"]
+        original_roi = original_slice[sy : sy + sh, sx : sx + sw]
+        src_min = float(np.nanmin(original_roi))
+        src_max = float(np.nanmax(original_roi))
+        if not np.isfinite(src_min) or not np.isfinite(src_max) or src_max <= src_min:
+            return np.full_like(arr, src_min if np.isfinite(src_min) else 0.0)
+        return np.clip(arr, 0.0, 1.0) * (src_max - src_min) + src_min
     if scale == "founddiff-hu":
         return arr * HU_RANGE + HU_MIN + 1024.0
     if scale == "unit":
@@ -621,8 +638,8 @@ def reconstruct_outputs(args: argparse.Namespace) -> None:
             if not den_path.is_file():
                 missing += 1
                 continue
-            denoised = model_output_to_values(np.load(den_path), args.model_output_scale)
             original_slice = get_slice(ref.array, axis, int(item["index"]))
+            denoised = model_output_to_values(np.load(den_path), args.model_output_scale, original_slice, item["crop"])
             restored = embed_slice(original_slice, denoised, item["crop"])
             put_slice(out_array, axis, int(item["index"]), restored)
             written += 1
