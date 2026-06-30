@@ -78,6 +78,18 @@ def parse_args():
         action="store_true",
         help="Keep previous files in data/external/nifti instead of isolating the current case.",
     )
+    p.add_argument(
+        "--intensity-scale",
+        choices=("slice-range", "founddiff-hu", "identity", "unit"),
+        default="slice-range",
+        help="Passed to reconstruct_denoised_nifti.py (default: slice-range).",
+    )
+    p.add_argument(
+        "--intensity-match",
+        choices=("minmax", "mean-ratio", "none"),
+        default="minmax",
+        help="Passed to reconstruct_denoised_nifti.py (default: minmax).",
+    )
     return p.parse_args()
 
 
@@ -176,6 +188,10 @@ def main():
         case,
         "--manifest",
         str(manifest),
+        "--intensity-scale",
+        args.intensity_scale,
+        "--intensity-match",
+        args.intensity_match,
     ]
     run(recon_cmd)
 

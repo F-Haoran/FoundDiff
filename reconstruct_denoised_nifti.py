@@ -46,6 +46,21 @@ def parse_args():
     p.add_argument("--stride", type=int, default=1, help="Fallback if no manifest")
     p.add_argument("--max-slices", type=int, default=0, help="Fallback if no manifest")
     p.add_argument("--prefix", default="lung", help="Slice filename prefix")
+    p.add_argument(
+        "--intensity-scale",
+        choices=("slice-range", "founddiff-hu", "identity", "unit"),
+        default="slice-range",
+        help=(
+            "How to convert FoundDiff [0,1] npy values before embedding. "
+            "slice-range maps each slice back to the original ROI min/max and preserves negatives."
+        ),
+    )
+    p.add_argument(
+        "--intensity-match",
+        choices=("minmax", "mean-ratio", "none"),
+        default="minmax",
+        help="Optional post-scale ROI intensity match against the original slice.",
+    )
     return p.parse_args()
 
 
@@ -63,16 +78,147 @@ def load_nifti_z_y_x(path: Path) -> tuple[np.ndarray, object]:
     return vol, img
 
 
-def embed_denoised(slice_hu: np.ndarray, denoised_norm: np.ndarray) -> np.ndarray:
-    den = denorm_to_hu(np.squeeze(denoised_norm))
-    h, w = slice_hu.shape
-    out = slice_hu.copy()
-    sh, sw = min(h, 512), min(w, 512)
-    y0 = max((512 - sh) // 2, 0)
-    x0 = max((512 - sw) // 2, 0)
-    sy0 = max((h - sh) // 2, 0)
-    sx0 = max((w - sw) // 2, 0)
-    out[sy0 : sy0 + sh, sx0 : sx0 + sw] = den[y0 : y0 + sh, x0 : x0 + sw]
+def center_crop_box(h: int, w: int, *, roi_h: int = 512, roi_w: int = 512) -> dict[str, int]:
+    sh, sw = min(h, roi_h), min(w, roi_w)
+    dst_y = max((roi_h - sh) // 2, 0)
+    dst_x = max((roi_w - sw) // 2, 0)
+    src_y = max((h - sh) // 2, 0)
+    src_x = max((w - sw) // 2, 0)
+    return {
+        "src_y": src_y,
+        "src_x": src_x,
+        "dst_y": dst_y,
+        "dst_x": dst_x,
+        "sh": sh,
+        "sw": sw,
+    }
+
+
+def finite_mean(values: np.ndarray) -> float | None:
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    return float(finite.mean())
+
+
+def finite_abs_mean(values: np.ndarray) -> float | None:
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    return float(np.abs(finite).mean())
+
+
+def finite_min_max(values: np.ndarray) -> tuple[float, float] | None:
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    return float(finite.min()), float(finite.max())
+
+
+def match_mean_ratio(
+    denoised512: np.ndarray,
+    original_roi: np.ndarray,
+    denoised_roi: np.ndarray,
+) -> np.ndarray:
+    original_mean = finite_mean(original_roi)
+    denoised_mean = finite_mean(denoised_roi)
+    if original_mean is None or denoised_mean is None:
+        return denoised512
+
+    if abs(denoised_mean) < 1e-6:
+        original_abs_mean = finite_abs_mean(original_roi)
+        denoised_abs_mean = finite_abs_mean(denoised_roi)
+        if original_abs_mean is not None and denoised_abs_mean is not None and denoised_abs_mean >= 1e-6:
+            return denoised512 * np.float32(original_abs_mean / denoised_abs_mean)
+        return denoised512 + np.float32(original_mean - denoised_mean)
+
+    ratio = original_mean / denoised_mean
+    if not np.isfinite(ratio) or ratio <= 0:
+        original_abs_mean = finite_abs_mean(original_roi)
+        denoised_abs_mean = finite_abs_mean(denoised_roi)
+        if original_abs_mean is not None and denoised_abs_mean is not None and denoised_abs_mean >= 1e-6:
+            return denoised512 * np.float32(original_abs_mean / denoised_abs_mean)
+        return denoised512 + np.float32(original_mean - denoised_mean)
+    return denoised512 * np.float32(ratio)
+
+
+def match_intensity_to_original(
+    denoised512: np.ndarray,
+    original_slice: np.ndarray,
+    crop: dict[str, int],
+    mode: str,
+) -> np.ndarray:
+    if mode == "none":
+        return denoised512
+    if mode not in {"minmax", "mean-ratio"}:
+        raise SystemExit(f"Unsupported --intensity-match: {mode}")
+
+    sy, sx, dy, dx = crop["src_y"], crop["src_x"], crop["dst_y"], crop["dst_x"]
+    sh, sw = crop["sh"], crop["sw"]
+    original_roi = original_slice[sy : sy + sh, sx : sx + sw]
+    denoised_roi = denoised512[dy : dy + sh, dx : dx + sw]
+
+    if mode == "mean-ratio":
+        return match_mean_ratio(denoised512, original_roi, denoised_roi)
+
+    original_bounds = finite_min_max(original_roi)
+    denoised_bounds = finite_min_max(denoised_roi)
+    if original_bounds is None or denoised_bounds is None:
+        return denoised512
+    original_min, original_max = original_bounds
+    denoised_min, denoised_max = denoised_bounds
+    denoised_range = denoised_max - denoised_min
+    original_range = original_max - original_min
+    if denoised_range <= 1e-6 or original_range <= 1e-6:
+        return match_mean_ratio(denoised512, original_roi, denoised_roi)
+
+    return (denoised512 - np.float32(denoised_min)) * np.float32(original_range / denoised_range) + np.float32(original_min)
+
+
+def scale_model_output(
+    output: np.ndarray,
+    scale: str,
+    original_slice: np.ndarray,
+    crop: dict[str, int],
+) -> np.ndarray:
+    arr = np.squeeze(output).astype(np.float32)
+    if arr.ndim != 2:
+        raise SystemExit(f"Expected a 2D denoised slice, got shape {arr.shape}")
+
+    if scale == "slice-range":
+        sy, sx = crop["src_y"], crop["src_x"]
+        sh, sw = crop["sh"], crop["sw"]
+        original_roi = original_slice[sy : sy + sh, sx : sx + sw]
+        src_min = float(np.nanmin(original_roi))
+        src_max = float(np.nanmax(original_roi))
+        if not np.isfinite(src_min) or not np.isfinite(src_max) or src_max <= src_min:
+            return np.full_like(arr, src_min if np.isfinite(src_min) else 0.0)
+        return np.clip(arr, 0.0, 1.0) * (src_max - src_min) + src_min
+    if scale == "founddiff-hu":
+        return denorm_to_hu(arr)
+    if scale == "unit":
+        return arr
+    if scale == "identity":
+        return arr
+    raise SystemExit(f"Unsupported --intensity-scale: {scale}")
+
+
+def embed_denoised(
+    slice_values: np.ndarray,
+    denoised_norm: np.ndarray,
+    *,
+    intensity_scale: str,
+    intensity_match: str,
+) -> np.ndarray:
+    h, w = slice_values.shape
+    crop = center_crop_box(h, w)
+    denoised512 = scale_model_output(denoised_norm, intensity_scale, slice_values, crop)
+    denoised512 = match_intensity_to_original(denoised512, slice_values, crop, intensity_match)
+
+    out = slice_values.copy()
+    sy, sx, dy, dx = crop["src_y"], crop["src_x"], crop["dst_y"], crop["dst_x"]
+    sh, sw = crop["sh"], crop["sw"]
+    out[sy : sy + sh, sx : sx + sw] = denoised512[dy : dy + sh, dx : dx + sw]
     return out
 
 
@@ -107,6 +253,13 @@ def load_manifest_mapping(args) -> list[tuple[str, int]] | None:
     raise SystemExit(f"Volume '{vol_name}' not found in manifest {args.manifest}")
 
 
+def describe_range(values: np.ndarray) -> str:
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return "all non-finite"
+    return f"min={finite.min():.3f} max={finite.max():.3f} mean={finite.mean():.3f}"
+
+
 def main():
     args = parse_args()
     vol_zyx, ref_img = load_nifti_z_y_x(args.input_nii)
@@ -123,7 +276,12 @@ def main():
                 continue
             if z < 0 or z >= out_vol.shape[0]:
                 raise SystemExit(f"Manifest z={z} out of range [0, {out_vol.shape[0]-1}] for {fname}")
-            out_vol[z] = embed_denoised(vol_zyx[z], np.load(dpath))
+            out_vol[z] = embed_denoised(
+                vol_zyx[z],
+                np.load(dpath),
+                intensity_scale=args.intensity_scale,
+                intensity_match=args.intensity_match,
+            )
             n_written += 1
         print(f"Manifest slices: {len(mapping)}  denoised written: {n_written}  missing npy: {n_missing}")
         if n_missing:
@@ -140,7 +298,12 @@ def main():
             z = idx * args.stride
             if z >= nz:
                 break
-            out_vol[z] = embed_denoised(vol_zyx[z], np.load(dpath))
+            out_vol[z] = embed_denoised(
+                vol_zyx[z],
+                np.load(dpath),
+                intensity_scale=args.intensity_scale,
+                intensity_match=args.intensity_match,
+            )
             n_written += 1
         print(f"Fallback mode: stride={args.stride}  written: {n_written}/{len(denoised)}")
 
@@ -149,7 +312,12 @@ def main():
     out_xyz = np.transpose(out_vol, (2, 1, 0))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     nib.save(nib.Nifti1Image(out_xyz.astype(np.float32), ref_img.affine, ref_img.header), str(args.output))
-    print(f"Input Z={vol_zyx.shape[0]}  output: {args.output}")
+    print(
+        f"Input Z={vol_zyx.shape[0]}  scale={args.intensity_scale}  match={args.intensity_match}\n"
+        f"  input:  {describe_range(vol_zyx)}\n"
+        f"  output: {describe_range(out_vol)}\n"
+        f"  saved:  {args.output}"
+    )
 
 
 if __name__ == "__main__":
