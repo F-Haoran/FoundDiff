@@ -90,6 +90,12 @@ def parse_args():
         default="minmax",
         help="Passed to reconstruct_denoised_nifti.py (default: minmax).",
     )
+    p.add_argument(
+        "--range-source",
+        choices=("slice", "roi"),
+        default="slice",
+        help="Passed to reconstruct_denoised_nifti.py (default: slice).",
+    )
     return p.parse_args()
 
 
@@ -179,7 +185,7 @@ def main():
         sys.executable,
         str(ROOT / "reconstruct_denoised_nifti.py"),
         "--input-nii",
-        str(low),
+        str(nifti),
         "--denoised-dir",
         str(ROOT / "checkpoints" / "FoundDiff" / "test_final_npy"),
         "--output",
@@ -192,6 +198,8 @@ def main():
         args.intensity_scale,
         "--intensity-match",
         args.intensity_match,
+        "--range-source",
+        args.range_source,
     ]
     run(recon_cmd)
 

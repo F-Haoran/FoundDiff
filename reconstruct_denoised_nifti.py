@@ -52,8 +52,14 @@ def parse_args():
         default="slice-range",
         help=(
             "How to convert FoundDiff [0,1] npy values before embedding. "
-            "slice-range maps each slice back to the original ROI min/max and preserves negatives."
+            "slice-range maps each slice back to the original intensity range."
         ),
+    )
+    p.add_argument(
+        "--range-source",
+        choices=("slice", "roi"),
+        default="slice",
+        help="For slice-range, use the full 2D slice or only the embedded ROI for min/max.",
     )
     p.add_argument(
         "--intensity-match",
@@ -72,10 +78,27 @@ def load_nifti_z_y_x(path: Path) -> tuple[np.ndarray, object]:
     import nibabel as nib
 
     img = nib.load(str(path))
-    vol = np.asarray(img.dataobj, dtype=np.float32)
+    # Use get_fdata() so scl_slope / scl_inter are applied (needed for signed HU values).
+    vol = np.asarray(img.get_fdata(), dtype=np.float32)
     if vol.ndim == 3:
         vol = np.transpose(vol, (2, 1, 0))
     return vol, img
+
+
+def save_nifti_like(data_xyz: np.ndarray, ref_img: object, output_path: Path) -> None:
+    import nibabel as nib
+
+    header = ref_img.header.copy()
+    header.set_data_dtype(np.float32)
+    header["scl_slope"] = np.float32(1.0)
+    header["scl_inter"] = np.float32(0.0)
+    finite = data_xyz[np.isfinite(data_xyz)]
+    if finite.size:
+        header["cal_min"] = float(finite.min())
+        header["cal_max"] = float(finite.max())
+    out_img = nib.Nifti1Image(data_xyz.astype(np.float32, copy=False), ref_img.affine, header)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    nib.save(out_img, str(output_path))
 
 
 def center_crop_box(h: int, w: int, *, roi_h: int = 512, roi_w: int = 512) -> dict[str, int]:
@@ -180,6 +203,8 @@ def scale_model_output(
     scale: str,
     original_slice: np.ndarray,
     crop: dict[str, int],
+    *,
+    range_source: str,
 ) -> np.ndarray:
     arr = np.squeeze(output).astype(np.float32)
     if arr.ndim != 2:
@@ -189,8 +214,9 @@ def scale_model_output(
         sy, sx = crop["src_y"], crop["src_x"]
         sh, sw = crop["sh"], crop["sw"]
         original_roi = original_slice[sy : sy + sh, sx : sx + sw]
-        src_min = float(np.nanmin(original_roi))
-        src_max = float(np.nanmax(original_roi))
+        reference = original_slice if range_source == "slice" else original_roi
+        src_min = float(np.nanmin(reference))
+        src_max = float(np.nanmax(reference))
         if not np.isfinite(src_min) or not np.isfinite(src_max) or src_max <= src_min:
             return np.full_like(arr, src_min if np.isfinite(src_min) else 0.0)
         return np.clip(arr, 0.0, 1.0) * (src_max - src_min) + src_min
@@ -209,10 +235,17 @@ def embed_denoised(
     *,
     intensity_scale: str,
     intensity_match: str,
+    range_source: str,
 ) -> np.ndarray:
     h, w = slice_values.shape
     crop = center_crop_box(h, w)
-    denoised512 = scale_model_output(denoised_norm, intensity_scale, slice_values, crop)
+    denoised512 = scale_model_output(
+        denoised_norm,
+        intensity_scale,
+        slice_values,
+        crop,
+        range_source=range_source,
+    )
     denoised512 = match_intensity_to_original(denoised512, slice_values, crop, intensity_match)
 
     out = slice_values.copy()
@@ -264,6 +297,7 @@ def main():
     args = parse_args()
     vol_zyx, ref_img = load_nifti_z_y_x(args.input_nii)
     out_vol = vol_zyx.copy()
+    print(f"Loaded input with get_fdata(): {describe_range(vol_zyx)}")
 
     mapping = load_manifest_mapping(args)
     if mapping:
@@ -281,6 +315,7 @@ def main():
                 np.load(dpath),
                 intensity_scale=args.intensity_scale,
                 intensity_match=args.intensity_match,
+                range_source=args.range_source,
             )
             n_written += 1
         print(f"Manifest slices: {len(mapping)}  denoised written: {n_written}  missing npy: {n_missing}")
@@ -303,17 +338,15 @@ def main():
                 np.load(dpath),
                 intensity_scale=args.intensity_scale,
                 intensity_match=args.intensity_match,
+                range_source=args.range_source,
             )
             n_written += 1
         print(f"Fallback mode: stride={args.stride}  written: {n_written}/{len(denoised)}")
 
-    import nibabel as nib
-
     out_xyz = np.transpose(out_vol, (2, 1, 0))
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    nib.save(nib.Nifti1Image(out_xyz.astype(np.float32), ref_img.affine, ref_img.header), str(args.output))
+    save_nifti_like(out_xyz, ref_img, args.output)
     print(
-        f"Input Z={vol_zyx.shape[0]}  scale={args.intensity_scale}  match={args.intensity_match}\n"
+        f"Input Z={vol_zyx.shape[0]}  scale={args.intensity_scale}  range={args.range_source}  match={args.intensity_match}\n"
         f"  input:  {describe_range(vol_zyx)}\n"
         f"  output: {describe_range(out_vol)}\n"
         f"  saved:  {args.output}"

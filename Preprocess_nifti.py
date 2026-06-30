@@ -51,7 +51,7 @@ def parse_args():
 def load_nifti_hu(path: Path) -> np.ndarray:
     import nibabel as nib
 
-    vol = np.asarray(nib.load(str(path)).dataobj, dtype=np.float32)
+    vol = np.asarray(nib.load(str(path)).get_fdata(), dtype=np.float32)
     if vol.ndim == 3:
         vol = np.transpose(vol, (2, 1, 0))
     return vol
