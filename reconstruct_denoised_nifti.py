@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -67,7 +68,94 @@ def parse_args():
         default="minmax",
         help="Optional post-scale ROI intensity match against the original slice.",
     )
+    p.add_argument(
+        "--range-stats-min",
+        type=float,
+        default=-2000.0,
+        help=(
+            "When estimating slice-range, ignore reference voxels below this value. "
+            "Useful to exclude air/mask padding around -3000."
+        ),
+    )
+    p.add_argument(
+        "--range-stats-max",
+        type=float,
+        default=2000.0,
+        help="When estimating slice-range, ignore reference voxels above this value.",
+    )
+    p.add_argument(
+        "--range-percentile",
+        default=None,
+        help=(
+            "Optional robust percentile pair for slice-range, e.g. 2,98. "
+            "Applied after --range-stats-min/max filtering."
+        ),
+    )
+    p.add_argument(
+        "--range-ignore-at-or-below",
+        type=float,
+        default=-2500.0,
+        help=(
+            "Ignore reference voxels at or below this value when estimating slice-range "
+            "(default: -2500 to drop common -3000 air/padding)."
+        ),
+    )
+    p.add_argument(
+        "--range-fixed-min",
+        type=float,
+        default=None,
+        help="Optional fixed output mapping minimum, e.g. -1500.",
+    )
+    p.add_argument(
+        "--range-fixed-max",
+        type=float,
+        default=None,
+        help="Optional fixed output mapping maximum, e.g. 1500.",
+    )
     return p.parse_args()
+
+
+@dataclass(frozen=True)
+class RangeOptions:
+    source: str
+    stats_min: float | None
+    stats_max: float | None
+    percentile: tuple[float, float] | None
+    ignore_at_or_below: float | None
+    fixed_min: float | None
+    fixed_max: float | None
+
+
+def parse_percentile_pair(raw: str | None) -> tuple[float, float] | None:
+    if raw is None or not str(raw).strip():
+        return None
+    parts = [part.strip() for part in str(raw).split(",") if part.strip()]
+    if len(parts) != 2:
+        raise SystemExit("--range-percentile must be two comma-separated values, e.g. 2,98")
+    try:
+        low = float(parts[0])
+        high = float(parts[1])
+    except ValueError as exc:
+        raise SystemExit(f"--range-percentile contains non-numeric values: {raw}") from exc
+    if not (0.0 <= low < high <= 100.0):
+        raise SystemExit("--range-percentile must satisfy 0 <= low < high <= 100")
+    return low, high
+
+
+def range_options_from_args(args: argparse.Namespace) -> RangeOptions:
+    if (args.range_fixed_min is None) ^ (args.range_fixed_max is None):
+        raise SystemExit("Set both --range-fixed-min and --range-fixed-max, or neither.")
+    if args.range_fixed_min is not None and args.range_fixed_max <= args.range_fixed_min:
+        raise SystemExit("--range-fixed-max must be greater than --range-fixed-min")
+    return RangeOptions(
+        source=args.range_source,
+        stats_min=args.range_stats_min,
+        stats_max=args.range_stats_max,
+        percentile=parse_percentile_pair(args.range_percentile),
+        ignore_at_or_below=args.range_ignore_at_or_below,
+        fixed_min=args.range_fixed_min,
+        fixed_max=args.range_fixed_max,
+    )
 
 
 def denorm_to_hu(norm_0_1: np.ndarray) -> np.ndarray:
@@ -138,6 +226,39 @@ def finite_min_max(values: np.ndarray) -> tuple[float, float] | None:
     return float(finite.min()), float(finite.max())
 
 
+def reference_values_for_range(reference: np.ndarray, opts: RangeOptions) -> np.ndarray:
+    if opts.fixed_min is not None and opts.fixed_max is not None:
+        return reference[np.isfinite(reference)]
+
+    values = reference[np.isfinite(reference)].astype(np.float64, copy=False)
+    if values.size == 0:
+        return values
+
+    if opts.ignore_at_or_below is not None:
+        values = values[values > opts.ignore_at_or_below]
+    if opts.stats_min is not None:
+        values = values[values >= opts.stats_min]
+    if opts.stats_max is not None:
+        values = values[values <= opts.stats_max]
+    return values
+
+
+def reference_intensity_bounds(reference: np.ndarray, opts: RangeOptions) -> tuple[float, float] | None:
+    if opts.fixed_min is not None and opts.fixed_max is not None:
+        return float(opts.fixed_min), float(opts.fixed_max)
+
+    values = reference_values_for_range(reference, opts)
+    if values.size == 0:
+        return None
+
+    if opts.percentile is not None:
+        low, high = opts.percentile
+        src_min, src_max = np.percentile(values, [low, high])
+        return float(src_min), float(src_max)
+
+    return float(values.min()), float(values.max())
+
+
 def match_mean_ratio(
     denoised512: np.ndarray,
     original_roi: np.ndarray,
@@ -170,6 +291,8 @@ def match_intensity_to_original(
     original_slice: np.ndarray,
     crop: dict[str, int],
     mode: str,
+    *,
+    range_opts: RangeOptions | None = None,
 ) -> np.ndarray:
     if mode == "none":
         return denoised512
@@ -184,7 +307,10 @@ def match_intensity_to_original(
     if mode == "mean-ratio":
         return match_mean_ratio(denoised512, original_roi, denoised_roi)
 
-    original_bounds = finite_min_max(original_roi)
+    if range_opts is not None:
+        original_bounds = reference_intensity_bounds(original_roi, range_opts)
+    else:
+        original_bounds = finite_min_max(original_roi)
     denoised_bounds = finite_min_max(denoised_roi)
     if original_bounds is None or denoised_bounds is None:
         return denoised512
@@ -204,7 +330,7 @@ def scale_model_output(
     original_slice: np.ndarray,
     crop: dict[str, int],
     *,
-    range_source: str,
+    range_opts: RangeOptions,
 ) -> np.ndarray:
     arr = np.squeeze(output).astype(np.float32)
     if arr.ndim != 2:
@@ -214,9 +340,11 @@ def scale_model_output(
         sy, sx = crop["src_y"], crop["src_x"]
         sh, sw = crop["sh"], crop["sw"]
         original_roi = original_slice[sy : sy + sh, sx : sx + sw]
-        reference = original_slice if range_source == "slice" else original_roi
-        src_min = float(np.nanmin(reference))
-        src_max = float(np.nanmax(reference))
+        reference = original_slice if range_opts.source == "slice" else original_roi
+        bounds = reference_intensity_bounds(reference, range_opts)
+        if bounds is None:
+            return np.full_like(arr, 0.0)
+        src_min, src_max = bounds
         if not np.isfinite(src_min) or not np.isfinite(src_max) or src_max <= src_min:
             return np.full_like(arr, src_min if np.isfinite(src_min) else 0.0)
         return np.clip(arr, 0.0, 1.0) * (src_max - src_min) + src_min
@@ -235,7 +363,7 @@ def embed_denoised(
     *,
     intensity_scale: str,
     intensity_match: str,
-    range_source: str,
+    range_opts: RangeOptions,
 ) -> np.ndarray:
     h, w = slice_values.shape
     crop = center_crop_box(h, w)
@@ -244,9 +372,15 @@ def embed_denoised(
         intensity_scale,
         slice_values,
         crop,
-        range_source=range_source,
+        range_opts=range_opts,
     )
-    denoised512 = match_intensity_to_original(denoised512, slice_values, crop, intensity_match)
+    denoised512 = match_intensity_to_original(
+        denoised512,
+        slice_values,
+        crop,
+        intensity_match,
+        range_opts=range_opts,
+    )
 
     out = slice_values.copy()
     sy, sx, dy, dx = crop["src_y"], crop["src_x"], crop["dst_y"], crop["dst_x"]
@@ -293,11 +427,27 @@ def describe_range(values: np.ndarray) -> str:
     return f"min={finite.min():.3f} max={finite.max():.3f} mean={finite.mean():.3f}"
 
 
+def describe_range_options(opts: RangeOptions) -> str:
+    parts = [f"source={opts.source}"]
+    if opts.fixed_min is not None and opts.fixed_max is not None:
+        parts.append(f"fixed=[{opts.fixed_min}, {opts.fixed_max}]")
+    else:
+        if opts.stats_min is not None or opts.stats_max is not None:
+            parts.append(f"stats=[{opts.stats_min}, {opts.stats_max}]")
+        if opts.percentile is not None:
+            parts.append(f"percentile={opts.percentile[0]},{opts.percentile[1]}")
+        if opts.ignore_at_or_below is not None:
+            parts.append(f"ignore<={opts.ignore_at_or_below}")
+    return " ".join(parts)
+
+
 def main():
     args = parse_args()
+    range_opts = range_options_from_args(args)
     vol_zyx, ref_img = load_nifti_z_y_x(args.input_nii)
     out_vol = vol_zyx.copy()
     print(f"Loaded input with get_fdata(): {describe_range(vol_zyx)}")
+    print(f"Range options: {describe_range_options(range_opts)}")
 
     mapping = load_manifest_mapping(args)
     if mapping:
@@ -315,7 +465,7 @@ def main():
                 np.load(dpath),
                 intensity_scale=args.intensity_scale,
                 intensity_match=args.intensity_match,
-                range_source=args.range_source,
+                range_opts=range_opts,
             )
             n_written += 1
         print(f"Manifest slices: {len(mapping)}  denoised written: {n_written}  missing npy: {n_missing}")
@@ -338,7 +488,7 @@ def main():
                 np.load(dpath),
                 intensity_scale=args.intensity_scale,
                 intensity_match=args.intensity_match,
-                range_source=args.range_source,
+                range_opts=range_opts,
             )
             n_written += 1
         print(f"Fallback mode: stride={args.stride}  written: {n_written}/{len(denoised)}")
@@ -346,7 +496,8 @@ def main():
     out_xyz = np.transpose(out_vol, (2, 1, 0))
     save_nifti_like(out_xyz, ref_img, args.output)
     print(
-        f"Input Z={vol_zyx.shape[0]}  scale={args.intensity_scale}  range={args.range_source}  match={args.intensity_match}\n"
+        f"Input Z={vol_zyx.shape[0]}  scale={args.intensity_scale}  match={args.intensity_match}\n"
+        f"  range: {describe_range_options(range_opts)}\n"
         f"  input:  {describe_range(vol_zyx)}\n"
         f"  output: {describe_range(out_vol)}\n"
         f"  saved:  {args.output}"

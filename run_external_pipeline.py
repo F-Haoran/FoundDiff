@@ -96,6 +96,41 @@ def parse_args():
         default="slice",
         help="Passed to reconstruct_denoised_nifti.py (default: slice).",
     )
+    p.add_argument(
+        "--range-stats-min",
+        type=float,
+        default=-2000.0,
+        help="Ignore reference voxels below this value when estimating slice-range.",
+    )
+    p.add_argument(
+        "--range-stats-max",
+        type=float,
+        default=2000.0,
+        help="Ignore reference voxels above this value when estimating slice-range.",
+    )
+    p.add_argument(
+        "--range-percentile",
+        default=None,
+        help="Optional robust percentile pair for slice-range, e.g. 2,98.",
+    )
+    p.add_argument(
+        "--range-ignore-at-or-below",
+        type=float,
+        default=-2500.0,
+        help="Ignore reference voxels at or below this value (default: -2500 for -3000 padding).",
+    )
+    p.add_argument(
+        "--range-fixed-min",
+        type=float,
+        default=None,
+        help="Optional fixed output mapping minimum, e.g. -1500.",
+    )
+    p.add_argument(
+        "--range-fixed-max",
+        type=float,
+        default=None,
+        help="Optional fixed output mapping maximum, e.g. 1500.",
+    )
     return p.parse_args()
 
 
@@ -200,7 +235,19 @@ def main():
         args.intensity_match,
         "--range-source",
         args.range_source,
+        "--range-stats-min",
+        str(args.range_stats_min),
+        "--range-stats-max",
+        str(args.range_stats_max),
+        "--range-ignore-at-or-below",
+        str(args.range_ignore_at_or_below),
     ]
+    if args.range_percentile:
+        recon_cmd.extend(["--range-percentile", args.range_percentile])
+    if args.range_fixed_min is not None:
+        recon_cmd.extend(["--range-fixed-min", str(args.range_fixed_min)])
+    if args.range_fixed_max is not None:
+        recon_cmd.extend(["--range-fixed-max", str(args.range_fixed_max)])
     run(recon_cmd)
 
     verify = ROOT / "verify_denoise.py"

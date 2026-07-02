@@ -58,6 +58,59 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Replace existing output .nii.gz files",
     )
+    p.add_argument(
+        "--intensity-scale",
+        choices=("slice-range", "founddiff-hu", "identity", "unit"),
+        default="slice-range",
+        help="Passed to reconstruct_denoised_nifti.py (default: slice-range).",
+    )
+    p.add_argument(
+        "--intensity-match",
+        choices=("minmax", "mean-ratio", "none"),
+        default="minmax",
+        help="Passed to reconstruct_denoised_nifti.py (default: minmax).",
+    )
+    p.add_argument(
+        "--range-source",
+        choices=("slice", "roi"),
+        default="slice",
+        help="Passed to reconstruct_denoised_nifti.py (default: slice).",
+    )
+    p.add_argument(
+        "--range-stats-min",
+        type=float,
+        default=-2000.0,
+        help="Ignore reference voxels below this value when estimating slice-range.",
+    )
+    p.add_argument(
+        "--range-stats-max",
+        type=float,
+        default=2000.0,
+        help="Ignore reference voxels above this value when estimating slice-range.",
+    )
+    p.add_argument(
+        "--range-percentile",
+        default=None,
+        help="Optional robust percentile pair for slice-range, e.g. 2,98.",
+    )
+    p.add_argument(
+        "--range-ignore-at-or-below",
+        type=float,
+        default=-2500.0,
+        help="Ignore reference voxels at or below this value (default: -2500 for -3000 padding).",
+    )
+    p.add_argument(
+        "--range-fixed-min",
+        type=float,
+        default=None,
+        help="Optional fixed output mapping minimum, e.g. -1500.",
+    )
+    p.add_argument(
+        "--range-fixed-max",
+        type=float,
+        default=None,
+        help="Optional fixed output mapping maximum, e.g. 1500.",
+    )
     return p.parse_args()
 
 
@@ -126,7 +179,25 @@ def main() -> int:
             str(output_dir),
             "--gpu",
             str(args.gpu),
+            "--intensity-scale",
+            args.intensity_scale,
+            "--intensity-match",
+            args.intensity_match,
+            "--range-source",
+            args.range_source,
+            "--range-stats-min",
+            str(args.range_stats_min),
+            "--range-stats-max",
+            str(args.range_stats_max),
+            "--range-ignore-at-or-below",
+            str(args.range_ignore_at_or_below),
         ]
+        if args.range_percentile:
+            cmd.extend(["--range-percentile", args.range_percentile])
+        if args.range_fixed_min is not None:
+            cmd.extend(["--range-fixed-min", str(args.range_fixed_min)])
+        if args.range_fixed_max is not None:
+            cmd.extend(["--range-fixed-max", str(args.range_fixed_max)])
         try:
             subprocess.run(cmd, cwd=ROOT, check=True)
         except subprocess.CalledProcessError:
