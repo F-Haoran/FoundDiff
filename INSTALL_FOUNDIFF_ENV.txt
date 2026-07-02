@@ -1,0 +1,71 @@
+FoundDiff Environment Setup (GPU)
+=================================
+
+Target: run Test.py / train.py inference on custom *_CT.nii.gz volumes.
+
+Prerequisites
+-------------
+- Linux
+- NVIDIA GPU + driver
+- conda (miniforge/anaconda)
+- git
+- ~15 GB disk for env + weights
+
+Quick install (copy-paste)
+--------------------------
+
+conda create -n FoundDiff python=3.10.20 -y
+conda activate FoundDiff
+
+# PyTorch GPU — RTX 50 series (cu128)
+pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
+  --index-url https://download.pytorch.org/whl/cu128
+
+# RTX 3090 / 30-series example (cu124) — use ONE torch line only
+# pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
+#   --index-url https://download.pytorch.org/whl/cu124
+
+pip install -r requirements.txt
+pip install git+https://github.com/openai/CLIP.git
+
+conda install -y -c nvidia cuda-nvcc=12.8
+
+export CUDA_HOME="$CONDA_PREFIX"
+export PATH="$CONDA_PREFIX/bin:$PATH"
+export TORCH_CUDA_ARCH_LIST="8.6"   # RTX 3090; use 12.0 for RTX 50 series
+
+pip install ninja packaging
+pip install "causal-conv1d>=1.2.0" --no-build-isolation
+pip install mamba-ssm --no-build-isolation
+
+# Re-pin torch if mamba changed it
+pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
+  --index-url https://download.pytorch.org/whl/cu128
+
+Model weights (manual download)
+-------------------------------
+Place files at:
+  src/DA-CLIP.pth
+  checkpoints/FoundDiff/sample/model-400.pt
+
+Download:
+  https://drive.google.com/drive/folders/1B33XyPqC9KkmzmfrCq20-7Xxuf-23PMc
+
+Verify
+------
+python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
+python -c "import selective_scan_cuda; print('mamba OK')"
+
+Run Test.py
+-----------
+cd /path/to/FoundDiff
+conda activate FoundDiff
+python Test.py --list
+python Test.py
+
+TORCH_CUDA_ARCH_LIST reference
+------------------------------
+  RTX 3090 / 3080  -> 8.6
+  A100             -> 8.0
+  RTX 4090         -> 8.9
+  RTX 5090 / 5060  -> 12.0
