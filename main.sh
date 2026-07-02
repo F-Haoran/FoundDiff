@@ -5,7 +5,7 @@ rddm_mamba: lr 8e-5   bs:1  sample_step:2
 rddm_mamba_clipiqa:lr 8e-5   bs:1  sample_step:2  total 4000000
 
 
-rddm_dn_all:所有数据 lr 8e-5   bs:1  sample_step:2  total 2000000
+rddm_dn_all: all data, lr 8e-5, bs:1, sample_step:2, total 2000000
 
 
 assm1   4000000 assm +

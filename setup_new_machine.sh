@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# FoundDiff 新机器环境安装（需联网）。用法: bash setup_new_machine.sh
+# FoundDiff setup on a new machine (requires network). Usage: bash setup_new_machine.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"

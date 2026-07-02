@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-单文件 FoundDiff 去噪入口 —— 改 config() 后直接运行，无需长命令行。
+Single-file FoundDiff denoising entry point — edit config() and run, no long CLI.
 
-用法:
-  python run_one_nifti.py              # 使用下方 config()
-  python run_one_nifti.py --show       # 打印当前配置
-  python run_one_nifti.py --dry-run    # 只打印将要执行的命令
+Usage:
+  python run_one_nifti.py              # use config() below
+  python run_one_nifti.py --show       # print current config
+  python run_one_nifti.py --dry-run    # print commands without executing
 
-Pipeline 概览 (mode=quick / full):
-  输入 .nii.gz
+Pipeline (mode=quick / full):
+  input .nii.gz
     -> Preprocess_nifti.py   (3D -> 2D lung-*.npy + slice_manifest.json)
-    -> train.py --data-mode external   (FoundDiff 推理，输出 2D denoised npy)
-    -> reconstruct_denoised_nifti.py (2D npy -> 3D 去噪 .nii.gz)
+    -> train.py --data-mode external   (FoundDiff inference -> 2D denoised npy)
+    -> reconstruct_denoised_nifti.py (2D npy -> 3D denoised .nii.gz)
 
-mode=reconstruct_only 时跳过前两步，只重建 3D（调强度范围时用）。
+mode=reconstruct_only skips the first two steps and only rebuilds 3D (for tuning intensity range).
 """
 
 from __future__ import annotations
@@ -29,38 +29,38 @@ ROOT = Path(__file__).resolve().parent
 
 
 def config() -> dict[str, Any]:
-    """在这里改路径和参数，然后运行: python run_one_nifti.py"""
+    """Edit paths and options here, then run: python run_one_nifti.py"""
 
-    # 本地 FoundDiff 根目录（Maybach 示例）
+    # Local FoundDiff root (Maybach example)
     root = Path("/home/FrankFei/FoundDiff")
 
     return {
-        # ----- 输入 / 输出 -----
-        # 必须用 LDCT（低剂量），不要用 *_CT.nii.gz（全剂量参考图）
+        # ----- input / output -----
+        # Use LDCT (low-dose) input, not *_CT.nii.gz (full-dose reference)
         "input_nii": root / "data/custom/nifti/APNHC00002_LDCT.nii.gz",
-        "case_name": None,  # None = 从文件名自动推断（如 APNHC00718_LDCT）
+        "case_name": None,  # None = infer from filename (e.g. APNHC00718_LDCT)
         "output_dir": root / "checkpoints/FoundDiff/custom_denoised_files",
         "output_suffix": "_denoised",
 
-        # ----- 运行模式 -----
-        # quick            : 快速试跑（约 50 层预处理 + 10 层推理，几分钟）
-        # full             : 全层处理（完整 3D 输出）
-        # reconstruct_only : 仅重建 3D（2D npy 已有时，调强度参数用）
+        # ----- run mode -----
+        # quick            : fast trial (~50 preprocess slices + 10 inference slices)
+        # full             : all slices (full 3D output)
+        # reconstruct_only : rebuild 3D only when 2D npy already exist
         "mode": "quick",
         "gpu": "0",
 
-        # ----- 强度映射（重建阶段）-----
+        # ----- intensity mapping (reconstruction) -----
         "intensity_scale": "slice-range",  # slice-range | founddiff-hu | identity | unit
         "intensity_match": "minmax",       # minmax | mean-ratio | none
         "range_source": "slice",           # slice | roi
         "range_stats_min": -2000.0,
         "range_stats_max": 2000.0,
-        "range_ignore_at_or_below": -2500.0,  # 忽略 -3000 填充
-        "range_percentile": None,             # 例如 "2,98"；None = 不用百分位
-        "range_fixed_min": -1500.0,           # None = 自动估计；可固定组织窗
+        "range_ignore_at_or_below": -2500.0,  # ignore -3000 padding
+        "range_percentile": None,             # e.g. "2,98"; None = no percentile
+        "range_fixed_min": -1500.0,           # None = auto estimate; or fix tissue window
         "range_fixed_max": 1500.0,
 
-        # ----- 内部路径（一般不用改）-----
+        # ----- internal paths (usually unchanged) -----
         "manifest": root / "data/external/external_2d/slice_manifest.json",
         "denoised_dir": root / "checkpoints/FoundDiff/test_final_npy",
     }
@@ -86,7 +86,7 @@ def build_pipeline_cmd(cfg: dict[str, Any]) -> list[str]:
     case = resolve_case(cfg)
     mode = cfg.get("mode", "quick")
     if mode not in {"quick", "full"}:
-        raise SystemExit(f"build_pipeline_cmd 需要 mode=quick/full，当前为 {mode!r}")
+        raise SystemExit(f"build_pipeline_cmd requires mode=quick/full, got {mode!r}")
 
     cmd = [
         sys.executable,
@@ -168,7 +168,7 @@ def build_reconstruct_cmd(cfg: dict[str, Any]) -> list[str]:
 
 def print_config(cfg: dict[str, Any]) -> None:
     case = resolve_case(cfg)
-    print("=== run_one_nifti.py 当前配置 ===")
+    print("=== run_one_nifti.py current config ===")
     for key, value in cfg.items():
         print(f"  {key}: {value}")
     print(f"  -> case_name (resolved): {case}")
@@ -181,16 +181,16 @@ def print_config(cfg: dict[str, Any]) -> None:
 def validate(cfg: dict[str, Any]) -> None:
     input_nii = Path(cfg["input_nii"]).expanduser().resolve()
     if not input_nii.is_file():
-        raise SystemExit(f"输入文件不存在: {input_nii}")
+        raise SystemExit(f"Input file not found: {input_nii}")
 
     fixed_min = cfg.get("range_fixed_min")
     fixed_max = cfg.get("range_fixed_max")
     if (fixed_min is None) ^ (fixed_max is None):
-        raise SystemExit("range_fixed_min 和 range_fixed_max 必须同时设置，或同时为 None")
+        raise SystemExit("Set both range_fixed_min and range_fixed_max, or neither")
 
     mode = cfg.get("mode", "quick")
     if mode not in {"quick", "full", "reconstruct_only"}:
-        raise SystemExit(f"未知 mode: {mode!r}，可选 quick | full | reconstruct_only")
+        raise SystemExit(f"Unknown mode: {mode!r}; choose quick | full | reconstruct_only")
 
 
 def run_cmd(cmd: list[str], *, dry_run: bool) -> None:
@@ -202,9 +202,9 @@ def run_cmd(cmd: list[str], *, dry_run: bool) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="单文件 FoundDiff 去噪（config 驱动）")
-    p.add_argument("--show", action="store_true", help="打印 config() 内容")
-    p.add_argument("--dry-run", action="store_true", help="只打印命令，不执行")
+    p = argparse.ArgumentParser(description="Single-file FoundDiff denoising (config-driven)")
+    p.add_argument("--show", action="store_true", help="Print config() contents")
+    p.add_argument("--dry-run", action="store_true", help="Print commands without executing")
     return p.parse_args()
 
 
@@ -220,7 +220,7 @@ def main() -> int:
     else:
         mode = cfg.get("mode", "quick")
         if mode not in {"quick", "full", "reconstruct_only"}:
-            raise SystemExit(f"未知 mode: {mode!r}，可选 quick | full | reconstruct_only")
+            raise SystemExit(f"Unknown mode: {mode!r}; choose quick | full | reconstruct_only")
 
     mode = cfg.get("mode", "quick")
     if mode == "reconstruct_only":
@@ -231,7 +231,7 @@ def main() -> int:
     if not args.dry_run:
         case = resolve_case(cfg)
         out = Path(cfg["output_dir"]) / f"{case}{cfg.get('output_suffix', '_denoised')}.nii.gz"
-        print(f"\n完成。输出: {out}")
+        print(f"\nDone. Output: {out}")
     return 0
 
 
