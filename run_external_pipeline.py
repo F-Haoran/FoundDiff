@@ -141,6 +141,14 @@ def main():
         print(f"File not found: {nifti}", file=sys.stderr)
         sys.exit(1)
 
+    stem_upper = nifti_stem(nifti).upper()
+    if stem_upper.endswith("_CT"):
+        print(
+            "Warning: input looks like full-dose reference (*_CT). "
+            "For denoising use the low-dose file (*_LDCT), not *_CT.",
+            file=sys.stderr,
+        )
+
     case = args.case or nifti_stem(nifti)
     ext_nifti = ROOT / "data" / "external" / "nifti"
     ext_2d = ROOT / "data" / "external" / "external_2d"

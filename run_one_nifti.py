@@ -31,12 +31,13 @@ ROOT = Path(__file__).resolve().parent
 def config() -> dict[str, Any]:
     """在这里改路径和参数，然后运行: python run_one_nifti.py"""
 
-    # 本地机器请改成你的绝对路径，例如 Path("/home/FrankFei/FoundDiff")
-    root = ROOT
+    # 本地 FoundDiff 根目录（Maybach 示例）
+    root = Path("/home/FrankFei/FoundDiff")
 
     return {
         # ----- 输入 / 输出 -----
-        "input_nii": root / "data/custom/nifti/your_case_LDCT.nii.gz",
+        # 必须用 LDCT（低剂量），不要用 *_CT.nii.gz（全剂量参考图）
+        "input_nii": root / "data/custom/nifti/APNHC00002_LDCT.nii.gz",
         "case_name": None,  # None = 从文件名自动推断（如 APNHC00718_LDCT）
         "output_dir": root / "checkpoints/FoundDiff/custom_denoised_files",
         "output_suffix": "_denoised",
