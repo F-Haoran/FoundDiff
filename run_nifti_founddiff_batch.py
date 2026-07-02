@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from nifti_naming import NAMING_CHOICES, NAMING_CT, infer_case_name, nifti_stem, should_denoise
+from nifti_naming import NAMING_CHOICES, NAMING_CT, collect_input_files, infer_case_name, nifti_stem
 
 
 ROOT = Path(__file__).resolve().parent
@@ -120,16 +120,11 @@ def parse_args() -> argparse.Namespace:
 
 def collect_inputs(args: argparse.Namespace) -> list[Path]:
     input_dir = args.input_dir.expanduser().resolve()
-    if not input_dir.is_dir():
-        raise SystemExit(f"Input directory not found: {input_dir}")
-
-    files = sorted(input_dir.glob(args.pattern))
-    selected = [path for path in files if should_denoise(path, naming=args.naming)]
-    if not selected:
-        raise SystemExit(
-            f"No matching denoising inputs in {input_dir} (naming={args.naming}, pattern={args.pattern})"
-        )
-    return selected
+    return collect_input_files(
+        input_dir,
+        pattern=args.pattern,
+        naming=args.naming,
+    )
 
 
 def main() -> int:

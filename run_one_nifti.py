@@ -1,30 +1,34 @@
 #!/usr/bin/env python3
 """
-Single-file FoundDiff denoising entry point — edit config() and run, no long CLI.
+FoundDiff denoising entry point — edit config() and run.
+
+Supports a single .nii.gz file OR a folder + glob pattern.
 
 Usage:
   python run_one_nifti.py              # use config() below
   python run_one_nifti.py --show       # print current config
   python run_one_nifti.py --dry-run    # print commands without executing
+  python run_one_nifti.py --list       # list matched inputs only
 
 Pipeline (mode=quick / full):
   input .nii.gz
-    -> Preprocess_nifti.py   (3D -> 2D lung-*.npy + slice_manifest.json)
-    -> train.py --data-mode external   (FoundDiff inference -> 2D denoised npy)
-    -> reconstruct_denoised_nifti.py (2D npy -> 3D denoised .nii.gz)
+    -> Preprocess_nifti.py
+    -> train.py --data-mode external
+    -> reconstruct_denoised_nifti.py
 
-mode=reconstruct_only skips the first two steps and only rebuilds 3D (for tuning intensity range).
+mode=reconstruct_only skips inference and only rebuilds 3D.
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
-from nifti_naming import NAMING_CT, infer_case_name
+from nifti_naming import NAMING_CT, collect_input_files, infer_case_name
 
 
 ROOT = Path(__file__).resolve().parent
@@ -33,34 +37,45 @@ ROOT = Path(__file__).resolve().parent
 def config() -> dict[str, Any]:
     """Edit paths and options here, then run: python run_one_nifti.py"""
 
-    # Local FoundDiff root (Maybach example)
     root = Path("/home/FrankFei/FoundDiff")
 
     return {
-        # ----- input / output -----
-        # *_CT.nii.gz is the noisy volume to denoise (custom naming convention)
-        "input_nii": root / "data/custom/nifti/APNHC00002_CT.nii.gz",
-        "case_name": None,  # None = infer from filename (e.g. APNHC00002_CT)
-        "naming": "ct",  # ct | ldct | any — passed to run_external_pipeline.py
+        # ----- input discovery -----
+        # Set input_path to ONE file OR a folder:
+        #   file:   .../APNHC00002_CT.nii.gz
+        #   folder: .../data/custom/nifti
+        "input_path": root / "data/custom/nifti",
+        # Glob pattern when input_path is a folder (fnmatch on filename):
+        #   "*_CT.nii.gz" | "APNHC*.nii.gz" | "*.nii.gz"
+        "pattern": "*_CT.nii.gz",
+        # ct | ldct | any — suffix-based filter after glob (see nifti_naming.py)
+        "naming": "ct",
+        # folder mode: False = first match only; True = all matches
+        "process_all": False,
+        # optional per-file case override; None = infer from filename
+        "case_name": None,
+        # strip suffixes from stem when inferring case; empty () keeps full stem (APNHC00002_CT)
+        "case_strip_suffixes": (),
+        "overwrite": False,
+
+        # ----- output -----
         "output_dir": root / "checkpoints/FoundDiff/custom_denoised_files",
         "output_suffix": "_denoised",
 
         # ----- run mode -----
-        # quick            : fast trial (~50 preprocess slices + 10 inference slices)
-        # full             : all slices (full 3D output)
-        # reconstruct_only : rebuild 3D only when 2D npy already exist
+        # quick | full | reconstruct_only
         "mode": "quick",
         "gpu": "0",
 
         # ----- intensity mapping (reconstruction) -----
-        "intensity_scale": "slice-range",  # slice-range | founddiff-hu | identity | unit
-        "intensity_match": "minmax",       # minmax | mean-ratio | none
-        "range_source": "slice",           # slice | roi
+        "intensity_scale": "slice-range",
+        "intensity_match": "minmax",
+        "range_source": "slice",
         "range_stats_min": -2000.0,
         "range_stats_max": 2000.0,
-        "range_ignore_at_or_below": -2500.0,  # ignore -3000 padding
-        "range_percentile": None,             # e.g. "2,98"; None = no percentile
-        "range_fixed_min": -1500.0,           # None = auto estimate; or fix tissue window
+        "range_ignore_at_or_below": -2500.0,
+        "range_percentile": None,
+        "range_fixed_min": -1500.0,
         "range_fixed_max": 1500.0,
 
         # ----- internal paths (usually unchanged) -----
@@ -69,13 +84,23 @@ def config() -> dict[str, Any]:
     }
 
 
-def resolve_case(cfg: dict[str, Any]) -> str:
-    return infer_case_name(Path(cfg["input_nii"]), cfg.get("case_name"))
+def resolve_case(cfg: dict[str, Any], input_nii: Path) -> str:
+    strip = cfg.get("case_strip_suffixes") or None
+    return infer_case_name(input_nii, cfg.get("case_name"), strip_suffixes=strip)
 
 
-def build_pipeline_cmd(cfg: dict[str, Any]) -> list[str]:
-    input_nii = Path(cfg["input_nii"]).expanduser().resolve()
-    case = resolve_case(cfg)
+def resolve_inputs(cfg: dict[str, Any]) -> list[Path]:
+    files = collect_input_files(
+        Path(cfg["input_path"]),
+        pattern=str(cfg.get("pattern", "*.nii.gz")),
+        naming=str(cfg.get("naming", NAMING_CT)),
+    )
+    if not cfg.get("process_all", False):
+        return files[:1]
+    return files
+
+
+def build_pipeline_cmd(cfg: dict[str, Any], input_nii: Path, case: str) -> list[str]:
     mode = cfg.get("mode", "quick")
     if mode not in {"quick", "full"}:
         raise SystemExit(f"build_pipeline_cmd requires mode=quick/full, got {mode!r}")
@@ -116,9 +141,7 @@ def build_pipeline_cmd(cfg: dict[str, Any]) -> list[str]:
     return cmd
 
 
-def build_reconstruct_cmd(cfg: dict[str, Any]) -> list[str]:
-    input_nii = Path(cfg["input_nii"]).expanduser().resolve()
-    case = resolve_case(cfg)
+def build_reconstruct_cmd(cfg: dict[str, Any], input_nii: Path, case: str) -> list[str]:
     output_dir = Path(cfg["output_dir"]).expanduser().resolve()
     suffix = str(cfg.get("output_suffix", "_denoised"))
     out_nii = output_dir / f"{case}{suffix}.nii.gz"
@@ -160,23 +183,21 @@ def build_reconstruct_cmd(cfg: dict[str, Any]) -> list[str]:
     return cmd
 
 
-def print_config(cfg: dict[str, Any]) -> None:
-    case = resolve_case(cfg)
+def output_path(cfg: dict[str, Any], case: str) -> Path:
+    return Path(cfg["output_dir"]) / f"{case}{cfg.get('output_suffix', '_denoised')}.nii.gz"
+
+
+def print_config(cfg: dict[str, Any], inputs: list[Path]) -> None:
     print("=== run_one_nifti.py current config ===")
     for key, value in cfg.items():
         print(f"  {key}: {value}")
-    print(f"  -> case_name (resolved): {case}")
-    mode = cfg.get("mode", "quick")
-    if mode == "reconstruct_only":
-        out = Path(cfg["output_dir"]) / f"{case}{cfg.get('output_suffix', '_denoised')}.nii.gz"
-        print(f"  -> output: {out}")
+    print(f"  -> matched inputs ({len(inputs)}):")
+    for path in inputs:
+        case = resolve_case(cfg, path)
+        print(f"       {path.name}  (case={case})")
 
 
-def validate(cfg: dict[str, Any]) -> None:
-    input_nii = Path(cfg["input_nii"]).expanduser().resolve()
-    if not input_nii.is_file():
-        raise SystemExit(f"Input file not found: {input_nii}")
-
+def validate(cfg: dict[str, Any], inputs: list[Path]) -> None:
     fixed_min = cfg.get("range_fixed_min")
     fixed_max = cfg.get("range_fixed_max")
     if (fixed_min is None) ^ (fixed_max is None):
@@ -185,6 +206,9 @@ def validate(cfg: dict[str, Any]) -> None:
     mode = cfg.get("mode", "quick")
     if mode not in {"quick", "full", "reconstruct_only"}:
         raise SystemExit(f"Unknown mode: {mode!r}; choose quick | full | reconstruct_only")
+
+    if not inputs:
+        raise SystemExit("No input files matched")
 
 
 def run_cmd(cmd: list[str], *, dry_run: bool) -> None:
@@ -195,37 +219,81 @@ def run_cmd(cmd: list[str], *, dry_run: bool) -> None:
     subprocess.run(cmd, cwd=ROOT, check=True)
 
 
+def apply_cli_overrides(cfg: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    out = copy.deepcopy(cfg)
+    if args.input_path is not None:
+        out["input_path"] = Path(args.input_path)
+    if args.pattern is not None:
+        out["pattern"] = args.pattern
+    if args.process_all:
+        out["process_all"] = True
+    if args.mode is not None:
+        out["mode"] = args.mode
+    return out
+
+
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Single-file FoundDiff denoising (config-driven)")
-    p.add_argument("--show", action="store_true", help="Print config() contents")
+    p = argparse.ArgumentParser(description="FoundDiff denoising (config-driven; file or folder)")
+    p.add_argument("--show", action="store_true", help="Print config and matched inputs")
+    p.add_argument("--list", action="store_true", help="List matched inputs and exit")
     p.add_argument("--dry-run", action="store_true", help="Print commands without executing")
+    p.add_argument("--input-path", type=Path, default=None, help="Override config input_path (file or folder)")
+    p.add_argument("--pattern", default=None, help="Override glob pattern, e.g. '*_CT.nii.gz'")
+    p.add_argument("--process-all", action="store_true", help="Process all folder matches (not just first)")
+    p.add_argument("--mode", choices=("quick", "full", "reconstruct_only"), default=None)
     return p.parse_args()
+
+
+def process_one(cfg: dict[str, Any], input_nii: Path, *, dry_run: bool) -> Path:
+    case = resolve_case(cfg, input_nii)
+    out = output_path(cfg, case)
+    if out.exists() and not cfg.get("overwrite", False):
+        print(f"Skip existing: {out}")
+        return out
+
+    print(f"Processing {input_nii.name} (case={case})")
+    mode = cfg.get("mode", "quick")
+    if mode == "reconstruct_only":
+        run_cmd(build_reconstruct_cmd(cfg, input_nii, case), dry_run=dry_run)
+    else:
+        run_cmd(build_pipeline_cmd(cfg, input_nii, case), dry_run=dry_run)
+    return out
 
 
 def main() -> int:
     args = parse_args()
-    cfg = config()
+    cfg = apply_cli_overrides(config(), args)
+    inputs = resolve_inputs(cfg)
 
-    if args.show or args.dry_run:
-        print_config(cfg)
+    if args.show or args.dry_run or args.list:
+        print_config(cfg, inputs)
+    if args.list:
+        return 0
 
     if not args.dry_run:
-        validate(cfg)
+        validate(cfg, inputs)
     else:
         mode = cfg.get("mode", "quick")
         if mode not in {"quick", "full", "reconstruct_only"}:
             raise SystemExit(f"Unknown mode: {mode!r}; choose quick | full | reconstruct_only")
 
-    mode = cfg.get("mode", "quick")
-    if mode == "reconstruct_only":
-        run_cmd(build_reconstruct_cmd(cfg), dry_run=args.dry_run)
-    else:
-        run_cmd(build_pipeline_cmd(cfg), dry_run=args.dry_run)
+    outputs: list[Path] = []
+    failures: list[str] = []
+    for index, input_nii in enumerate(inputs, start=1):
+        if len(inputs) > 1:
+            print(f"\n[{index}/{len(inputs)}] {input_nii.name}")
+        try:
+            outputs.append(process_one(cfg, input_nii, dry_run=args.dry_run))
+        except subprocess.CalledProcessError:
+            failures.append(input_nii.name)
 
     if not args.dry_run:
-        case = resolve_case(cfg)
-        out = Path(cfg["output_dir"]) / f"{case}{cfg.get('output_suffix', '_denoised')}.nii.gz"
-        print(f"\nDone. Output: {out}")
+        print("\nDone.")
+        for out in outputs:
+            print(f"  output: {out}")
+    if failures:
+        print("Failed:", ", ".join(failures), file=sys.stderr)
+        return 1
     return 0
 
 
