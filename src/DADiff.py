@@ -1822,7 +1822,18 @@ class Trainer(object):
     def test(self, sample=False, last=True, FID=False):
         self.ema.ema_model.init()
         self.ema.to(self.device)
+        external_mode = getattr(self.opt, "data_mode", "author") == "external"
         print("test start")
+        if external_mode:
+            print(
+                "[FoundDiff external] Custom-data inference: only denoising your prepared "
+                "test slices and saving .npy files."
+            )
+            print(
+                "[FoundDiff external] Skipping Mayo author benchmark metrics "
+                "(ab/lung/head PSNR/SSIM in src/DADiff.py::test) — those slices counts "
+                "are hardcoded for the paper dataset, not your NIfTI case."
+            )
         if self.condition:
             self.ema.ema_model.eval()
             loader = DataLoader(
@@ -1885,13 +1896,14 @@ class Trainer(object):
                                 k += 1
 
                         #ipdb.set_trace()
-                        psnr=util.compute_psnr(y_pred,y)
-                        ssim=util.compute_ssim(y_pred,y)
-                        rmse=util.compute_rmse(y_pred,y)
-                        self.test_running_psnr.append(psnr.detach().cpu().numpy())
-                        self.test_running_ssim.append(ssim.detach().cpu().numpy())
-                        self.test_running_rmse.append(rmse.detach().cpu().numpy())
-                        print('(psnr: %.4f, ssim: %.4f,rmse:.%.4f) ' % (psnr, ssim,rmse))
+                        if not external_mode:
+                            psnr=util.compute_psnr(y_pred,y)
+                            ssim=util.compute_ssim(y_pred,y)
+                            rmse=util.compute_rmse(y_pred,y)
+                            self.test_running_psnr.append(psnr.detach().cpu().numpy())
+                            self.test_running_ssim.append(ssim.detach().cpu().numpy())
+                            self.test_running_rmse.append(rmse.detach().cpu().numpy())
+                            print('(psnr: %.4f, ssim: %.4f,rmse:.%.4f) ' % (psnr, ssim,rmse))
 
                 all_images = torch.cat(all_images_list, dim=0)
 
@@ -1919,42 +1931,51 @@ class Trainer(object):
                     np.save(npy_name,all_images.detach().cpu().numpy().reshape(512,512))
                     print("test-save "+file_name)
 
-            #ipdb.set_trace()
-            length=290
-            ab_psnr=self.test_running_psnr[:290*4]
-            ab_ssim=self.test_running_ssim[:290*4]
-            ab_rmse=self.test_running_rmse[:290*4]
-            self.train_logger.info('(ab average mean: psnr: %.4f, ssim: %.4f,rmse: %.4f)' % (np.mean(ab_psnr), np.mean(ab_ssim),np.mean(ab_rmse)))
-            for i in range(4):
-                dose_test_psnr= np.mean(ab_psnr[int(i*length):int((i+1)*length)])
-                dose_test_ssim= np.mean(ab_ssim[int(i*length):int((i+1)*length)])
-                dose_test_rmse= np.mean(ab_rmse[int(i*length):int((i+1)*length)])
-                self.train_logger.info('(ab————dose: %2d,average: psnr: %.4f, ssim: %.4f,rmse: %.4f)' % (i,dose_test_psnr, dose_test_ssim,dose_test_rmse))
-                
+            if external_mode:
+                msg = (
+                    f"[FoundDiff external] Saved {i} denoised slice(s) to {self.results_folder}. "
+                    "Reconstruct 3D with reconstruct_denoised_nifti.py."
+                )
+                print(msg)
+                if self.train_logger is not None:
+                    self.train_logger.info(msg)
+            else:
+                # Mayo 2020 author benchmark breakdown (fixed slice counts per body region / dose).
+                length=290
+                ab_psnr=self.test_running_psnr[:290*4]
+                ab_ssim=self.test_running_ssim[:290*4]
+                ab_rmse=self.test_running_rmse[:290*4]
+                self.train_logger.info('(ab average mean: psnr: %.4f, ssim: %.4f,rmse: %.4f)' % (np.mean(ab_psnr), np.mean(ab_ssim),np.mean(ab_rmse)))
+                for i in range(4):
+                    dose_test_psnr= np.mean(ab_psnr[int(i*length):int((i+1)*length)])
+                    dose_test_ssim= np.mean(ab_ssim[int(i*length):int((i+1)*length)])
+                    dose_test_rmse= np.mean(ab_rmse[int(i*length):int((i+1)*length)])
+                    self.train_logger.info('(ab————dose: %2d,average: psnr: %.4f, ssim: %.4f,rmse: %.4f)' % (i,dose_test_psnr, dose_test_ssim,dose_test_rmse))
+                    
 
-            length=637
-            lung_psnr=self.test_running_psnr[290*4:290*4+637*4]
-            lung_ssim=self.test_running_ssim[290*4:290*4+637*4]
-            lung_rmse=self.test_running_rmse[290*4:290*4+637*4]
-            self.train_logger.info('(lung average mean: psnr: %.4f, ssim: %.4f,rmse: %.4f)' % (np.mean(lung_psnr), np.mean(lung_ssim),np.mean(lung_rmse)))
-            for i in range(4):
-                dose_test_psnr= np.mean(lung_psnr[int(i*length):int((i+1)*length)])
-                dose_test_ssim= np.mean(lung_ssim[int(i*length):int((i+1)*length)])
-                dose_test_rmse= np.mean(lung_rmse[int(i*length):int((i+1)*length)])
-                self.train_logger.info('(lung————dose: %2d,average: psnr: %.4f, ssim: %.4f,rmse: %.4f)' % (i,dose_test_psnr, dose_test_ssim,dose_test_rmse))
+                length=637
+                lung_psnr=self.test_running_psnr[290*4:290*4+637*4]
+                lung_ssim=self.test_running_ssim[290*4:290*4+637*4]
+                lung_rmse=self.test_running_rmse[290*4:290*4+637*4]
+                self.train_logger.info('(lung average mean: psnr: %.4f, ssim: %.4f,rmse: %.4f)' % (np.mean(lung_psnr), np.mean(lung_ssim),np.mean(lung_rmse)))
+                for i in range(4):
+                    dose_test_psnr= np.mean(lung_psnr[int(i*length):int((i+1)*length)])
+                    dose_test_ssim= np.mean(lung_ssim[int(i*length):int((i+1)*length)])
+                    dose_test_rmse= np.mean(lung_rmse[int(i*length):int((i+1)*length)])
+                    self.train_logger.info('(lung————dose: %2d,average: psnr: %.4f, ssim: %.4f,rmse: %.4f)' % (i,dose_test_psnr, dose_test_ssim,dose_test_rmse))
 
-            length=159
-            head_psnr=self.test_running_psnr[-159*4:]
-            head_ssim=self.test_running_ssim[-159*4:]
-            head_rmse=self.test_running_rmse[-159*4:]
-            self.train_logger.info('(head average mean: psnr: %.4f, ssim: %.4f,rmse: %.4f)' % (np.mean(head_psnr), np.mean(head_ssim),np.mean(head_rmse)))
-            for i in range(4):
-                dose_test_psnr= np.mean(head_psnr[int(i*length):int((i+1)*length)])
-                dose_test_ssim= np.mean(head_ssim[int(i*length):int((i+1)*length)])
-                dose_test_rmse= np.mean(head_rmse[int(i*length):int((i+1)*length)])
-                self.train_logger.info('(head————dose: %2d,average: psnr: %.4f, ssim: %.4f,rmse: %.4f)' % (i,dose_test_psnr, dose_test_ssim,dose_test_rmse))
+                length=159
+                head_psnr=self.test_running_psnr[-159*4:]
+                head_ssim=self.test_running_ssim[-159*4:]
+                head_rmse=self.test_running_rmse[-159*4:]
+                self.train_logger.info('(head average mean: psnr: %.4f, ssim: %.4f,rmse: %.4f)' % (np.mean(head_psnr), np.mean(head_ssim),np.mean(head_rmse)))
+                for i in range(4):
+                    dose_test_psnr= np.mean(head_psnr[int(i*length):int((i+1)*length)])
+                    dose_test_ssim= np.mean(head_ssim[int(i*length):int((i+1)*length)])
+                    dose_test_rmse= np.mean(head_rmse[int(i*length):int((i+1)*length)])
+                    self.train_logger.info('(head————dose: %2d,average: psnr: %.4f, ssim: %.4f,rmse: %.4f)' % (i,dose_test_psnr, dose_test_ssim,dose_test_rmse))
 
-            self.train_logger.info('test_psnr: {:.4f}, test_ssim: {:.4f},test_rmse:{:.4f}'.format(np.mean(self.test_running_psnr), np.mean(self.test_running_ssim), np.mean(self.test_running_rmse)))   
+                self.train_logger.info('test_psnr: {:.4f}, test_ssim: {:.4f},test_rmse:{:.4f}'.format(np.mean(self.test_running_psnr), np.mean(self.test_running_ssim), np.mean(self.test_running_rmse)))   
                  
         else:
             if FID:
