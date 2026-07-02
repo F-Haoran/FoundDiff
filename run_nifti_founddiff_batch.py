@@ -5,10 +5,8 @@ Batch FoundDiff denoising for a folder of .nii.gz files.
 Each input is processed in isolation through run_external_pipeline.py so the
 manifest, slice layout, and reconstruction step stay aligned with one case.
 
-By default only low-dose inputs are processed:
-  *_LDCT.nii.gz
-
-Full-dose reference files such as *_CT.nii.gz are skipped unless --include-ct is set.
+Default naming (ct): denoise *_CT.nii.gz files — common when exports use CT suffix
+for the low-dose volume. Use --naming ldct for Mayo-style *_LDCT inputs.
 """
 
 from __future__ import annotations
@@ -17,6 +15,8 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+
+from nifti_naming import NAMING_CHOICES, NAMING_CT, infer_case_name, nifti_stem, should_denoise
 
 
 ROOT = Path(__file__).resolve().parent
@@ -44,9 +44,13 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--gpu", default="0", help="CUDA device id passed to run_external_pipeline.py")
     p.add_argument(
-        "--include-ct",
-        action="store_true",
-        help="Also process *_CT.nii.gz files (default: only *_LDCT.nii.gz)",
+        "--naming",
+        choices=NAMING_CHOICES,
+        default=NAMING_CT,
+        help=(
+            "Input filename convention: ct=*_CT.nii.gz is noisy input (default); "
+            "ldct=*_LDCT input and skip *_CT; any=skip only *_FULL."
+        ),
     )
     p.add_argument(
         "--pattern",
@@ -114,39 +118,17 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def nifti_stem(path: Path) -> str:
-    name = path.name
-    if name.endswith(".nii.gz"):
-        return name[:-7]
-    if name.endswith(".nii"):
-        return name[:-4]
-    return path.stem
-
-
-def should_process(path: Path, *, include_ct: bool) -> bool:
-    stem = nifti_stem(path)
-    upper = stem.upper()
-    if upper.endswith("_CT"):
-        return include_ct
-    if upper.endswith("_LDCT"):
-        return True
-    if upper.endswith("_LOW"):
-        return True
-    if include_ct:
-        return True
-    # Generic custom names like osasd-2.nii.gz
-    return not upper.endswith("_FULL")
-
-
 def collect_inputs(args: argparse.Namespace) -> list[Path]:
     input_dir = args.input_dir.expanduser().resolve()
     if not input_dir.is_dir():
         raise SystemExit(f"Input directory not found: {input_dir}")
 
     files = sorted(input_dir.glob(args.pattern))
-    selected = [path for path in files if path.is_file() and should_process(path, include_ct=args.include_ct)]
+    selected = [path for path in files if should_denoise(path, naming=args.naming)]
     if not selected:
-        raise SystemExit(f"No matching .nii.gz files found in {input_dir}")
+        raise SystemExit(
+            f"No matching denoising inputs in {input_dir} (naming={args.naming}, pattern={args.pattern})"
+        )
     return selected
 
 
@@ -156,13 +138,13 @@ def main() -> int:
     output_dir = args.output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Found {len(inputs)} file(s) to process")
+    print(f"Found {len(inputs)} file(s) to process (naming={args.naming})")
     print(f"Output dir: {output_dir}")
     print(f"Mode: {args.mode}")
 
     failures: list[str] = []
     for index, input_path in enumerate(inputs, start=1):
-        case = nifti_stem(input_path)
+        case = infer_case_name(input_path)
         output_path = output_dir / f"{case}_denoised.nii.gz"
         if output_path.exists() and not args.overwrite:
             print(f"[{index}/{len(inputs)}] Skip existing: {output_path}")
@@ -179,6 +161,8 @@ def main() -> int:
             str(output_dir),
             "--gpu",
             str(args.gpu),
+            "--naming",
+            args.naming,
             "--intensity-scale",
             args.intensity_scale,
             "--intensity-match",

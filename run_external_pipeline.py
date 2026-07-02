@@ -6,9 +6,9 @@ Usage:
   python run_external_pipeline.py /path/to/noisy.nii.gz
   python run_external_pipeline.py /path/to/noisy.nii.gz case001
   python run_external_pipeline.py /path/to/noisy.nii.gz case001 full
-  python run_external_pipeline.py /path/to/noisy.nii.gz case001 full --output-dir checkpoints/FoundDiff/custom_denoised_files
+  python run_external_pipeline.py /path/to/case_CT.nii.gz case_CT full --output-dir checkpoints/FoundDiff/custom_denoised_files
 
-Steps: copy nii -> Preprocess_nifti -> train.py (external) -> reconstruct nii.gz
+Supports *_CT.nii.gz as denoising input (custom naming). Use --naming ldct for Mayo-style *_LDCT inputs.
 """
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+from nifti_naming import NAMING_CHOICES, NAMING_CT, NAMING_LDCT, infer_case_name, nifti_stem
 
 
 ROOT = Path(__file__).resolve().parent
@@ -31,15 +33,6 @@ def run(cmd: list[str], env: dict | None = None) -> None:
     if env:
         merged.update(env)
     subprocess.run(cmd, cwd=ROOT, env=merged, check=True)
-
-
-def nifti_stem(path: Path) -> str:
-    name = path.name
-    if name.endswith(".nii.gz"):
-        return name[:-7]
-    if name.endswith(".nii"):
-        return name[:-4]
-    return path.stem
 
 
 def clean_staging_nifti(ext_nifti: Path) -> None:
@@ -73,6 +66,15 @@ def parse_args():
         help="Output suffix before .nii.gz (default: _denoised)",
     )
     p.add_argument("--gpu", default=os.environ.get("CUDA_VISIBLE_DEVICES", "0"))
+    p.add_argument(
+        "--naming",
+        choices=NAMING_CHOICES,
+        default=NAMING_CT,
+        help=(
+            "Input filename convention: ct=*_CT.nii.gz is noisy input (default); "
+            "ldct=*_LDCT input and skip *_CT reference; any=skip only *_FULL."
+        ),
+    )
     p.add_argument(
         "--keep-staging",
         action="store_true",
@@ -141,15 +143,14 @@ def main():
         print(f"File not found: {nifti}", file=sys.stderr)
         sys.exit(1)
 
-    stem_upper = nifti_stem(nifti).upper()
-    if stem_upper.endswith("_CT"):
+    case = infer_case_name(nifti, args.case)
+    if args.naming == NAMING_CT and nifti_stem(nifti).upper().endswith("_CT"):
+        print(f"Input naming: ct (*_CT.nii.gz treated as noisy volume to denoise)")
+    elif args.naming == NAMING_LDCT and nifti_stem(nifti).upper().endswith("_CT"):
         print(
-            "Warning: input looks like full-dose reference (*_CT). "
-            "For denoising use the low-dose file (*_LDCT), not *_CT.",
+            "Warning: --naming ldct expects *_LDCT input; *_CT is treated as reference and skipped in batch mode.",
             file=sys.stderr,
         )
-
-    case = args.case or nifti_stem(nifti)
     ext_nifti = ROOT / "data" / "external" / "nifti"
     ext_2d = ROOT / "data" / "external" / "external_2d"
     manifest = ext_2d / "slice_manifest.json"

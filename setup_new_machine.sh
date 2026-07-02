@@ -61,5 +61,5 @@ PY
 echo ""
 echo "Next:"
 echo "  1) Put src/DA-CLIP.pth and checkpoints/FoundDiff/sample/model-400.pt"
-echo "  2) Put nii.gz in data/custom/nifti/  (exp001_LDCT.nii.gz + exp001_CT.nii.gz)"
+echo "  2) Put nii.gz in data/custom/nifti/  (e.g. case001_CT.nii.gz or case001_LDCT.nii.gz)"
 echo "  3) bash run_custom_nifti.sh"

@@ -24,6 +24,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from nifti_naming import NAMING_CT, infer_case_name
+
 
 ROOT = Path(__file__).resolve().parent
 
@@ -36,9 +38,10 @@ def config() -> dict[str, Any]:
 
     return {
         # ----- input / output -----
-        # Use LDCT (low-dose) input, not *_CT.nii.gz (full-dose reference)
-        "input_nii": root / "data/custom/nifti/APNHC00002_LDCT.nii.gz",
-        "case_name": None,  # None = infer from filename (e.g. APNHC00718_LDCT)
+        # *_CT.nii.gz is the noisy volume to denoise (custom naming convention)
+        "input_nii": root / "data/custom/nifti/APNHC00002_CT.nii.gz",
+        "case_name": None,  # None = infer from filename (e.g. APNHC00002_CT)
+        "naming": "ct",  # ct | ldct | any — passed to run_external_pipeline.py
         "output_dir": root / "checkpoints/FoundDiff/custom_denoised_files",
         "output_suffix": "_denoised",
 
@@ -66,19 +69,8 @@ def config() -> dict[str, Any]:
     }
 
 
-def nifti_stem(path: Path) -> str:
-    name = path.name
-    if name.endswith(".nii.gz"):
-        return name[:-7]
-    if name.endswith(".nii"):
-        return name[:-4]
-    return path.stem
-
-
 def resolve_case(cfg: dict[str, Any]) -> str:
-    if cfg.get("case_name"):
-        return str(cfg["case_name"])
-    return nifti_stem(Path(cfg["input_nii"]))
+    return infer_case_name(Path(cfg["input_nii"]), cfg.get("case_name"))
 
 
 def build_pipeline_cmd(cfg: dict[str, Any]) -> list[str]:
@@ -100,6 +92,8 @@ def build_pipeline_cmd(cfg: dict[str, Any]) -> list[str]:
         str(cfg.get("output_suffix", "_denoised")),
         "--gpu",
         str(cfg.get("gpu", "0")),
+        "--naming",
+        str(cfg.get("naming", NAMING_CT)),
         "--intensity-scale",
         str(cfg.get("intensity_scale", "slice-range")),
         "--intensity-match",
