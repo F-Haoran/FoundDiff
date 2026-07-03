@@ -34,6 +34,10 @@ def main():
         str(out),
         "--volume-name",
         case,
+        "--intensity-scale",
+        "founddiff-hu",
+        "--intensity-match",
+        "none",
     ]
     if manifest.is_file():
         cmd.extend(["--manifest", str(manifest)])
