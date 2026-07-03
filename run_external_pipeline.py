@@ -82,11 +82,11 @@ def parse_args():
     )
     p.add_argument(
         "--intensity-scale",
-        choices=("founddiff-hu", "preserve-original", "slice-range", "identity", "unit"),
-        default="founddiff-hu",
+        choices=("preserve-original", "founddiff-hu", "slice-range", "identity", "unit"),
+        default="preserve-original",
         help=(
-            "Passed to reconstruct_denoised_nifti.py (default: founddiff-hu). "
-            "Use founddiff-hu so output HU matches the original FoundDiff input mapping."
+            "Passed to reconstruct_denoised_nifti.py (default: preserve-original). "
+            "Maps model [0,1] back to each slice's original HU range."
         ),
     )
     p.add_argument(
@@ -107,14 +107,14 @@ def parse_args():
     p.add_argument(
         "--range-stats-min",
         type=float,
-        default=-2000.0,
-        help="Ignore reference voxels below this value when estimating slice-range.",
+        default=None,
+        help="Optional lower bound when estimating intensity range (default: none).",
     )
     p.add_argument(
         "--range-stats-max",
         type=float,
-        default=2000.0,
-        help="Ignore reference voxels above this value when estimating slice-range.",
+        default=None,
+        help="Optional upper bound when estimating intensity range (default: none).",
     )
     p.add_argument(
         "--range-percentile",
@@ -250,13 +250,13 @@ def main():
         args.intensity_match,
         "--range-source",
         args.range_source,
-        "--range-stats-min",
-        str(args.range_stats_min),
-        "--range-stats-max",
-        str(args.range_stats_max),
         "--range-ignore-at-or-below",
         str(args.range_ignore_at_or_below),
     ]
+    if args.range_stats_min is not None:
+        recon_cmd.extend(["--range-stats-min", str(args.range_stats_min)])
+    if args.range_stats_max is not None:
+        recon_cmd.extend(["--range-stats-max", str(args.range_stats_max)])
     if args.range_percentile:
         recon_cmd.extend(["--range-percentile", args.range_percentile])
     if args.range_fixed_min is not None:

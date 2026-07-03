@@ -68,12 +68,12 @@ def config() -> dict[str, Any]:
         "gpu": "0",
 
         # ----- intensity mapping (reconstruction) -----
-        # founddiff-hu inverts PDFDataset norm (HU = norm*3000+24); minmax aligns ROI to original.
-        "intensity_scale": "founddiff-hu",
+        # preserve-original: founddiff-hu + per-slice minmax to match input HU range.
+        "intensity_scale": "preserve-original",
         "intensity_match": "none",
         "range_source": "slice",
-        "range_stats_min": -2000.0,
-        "range_stats_max": 2000.0,
+        "range_stats_min": None,
+        "range_stats_max": None,
         "range_ignore_at_or_below": -2500.0,
         "range_percentile": None,
         "range_fixed_min": None,
@@ -101,6 +101,29 @@ def resolve_inputs(cfg: dict[str, Any]) -> list[Path]:
     return files
 
 
+def append_range_args(cmd: list[str], cfg: dict[str, Any]) -> None:
+    cmd.extend(
+        [
+            "--range-source",
+            str(cfg.get("range_source", "slice")),
+            "--range-ignore-at-or-below",
+            str(cfg.get("range_ignore_at_or_below", -2500.0)),
+        ]
+    )
+    stats_min = cfg.get("range_stats_min")
+    stats_max = cfg.get("range_stats_max")
+    if stats_min is not None:
+        cmd.extend(["--range-stats-min", str(stats_min)])
+    if stats_max is not None:
+        cmd.extend(["--range-stats-max", str(stats_max)])
+    if cfg.get("range_percentile"):
+        cmd.extend(["--range-percentile", str(cfg["range_percentile"])])
+    if cfg.get("range_fixed_min") is not None:
+        cmd.extend(["--range-fixed-min", str(cfg["range_fixed_min"])])
+    if cfg.get("range_fixed_max") is not None:
+        cmd.extend(["--range-fixed-max", str(cfg["range_fixed_max"])])
+
+
 def build_pipeline_cmd(cfg: dict[str, Any], input_nii: Path, case: str) -> list[str]:
     mode = cfg.get("mode", "quick")
     if mode not in {"quick", "full"}:
@@ -121,24 +144,11 @@ def build_pipeline_cmd(cfg: dict[str, Any], input_nii: Path, case: str) -> list[
         "--naming",
         str(cfg.get("naming", NAMING_CT)),
         "--intensity-scale",
-        str(cfg.get("intensity_scale", "founddiff-hu")),
+        str(cfg.get("intensity_scale", "preserve-original")),
         "--intensity-match",
         str(cfg.get("intensity_match", "none")),
-        "--range-source",
-        str(cfg.get("range_source", "slice")),
-        "--range-stats-min",
-        str(cfg.get("range_stats_min", -2000.0)),
-        "--range-stats-max",
-        str(cfg.get("range_stats_max", 2000.0)),
-        "--range-ignore-at-or-below",
-        str(cfg.get("range_ignore_at_or_below", -2500.0)),
     ]
-    if cfg.get("range_percentile"):
-        cmd.extend(["--range-percentile", str(cfg["range_percentile"])])
-    if cfg.get("range_fixed_min") is not None:
-        cmd.extend(["--range-fixed-min", str(cfg["range_fixed_min"])])
-    if cfg.get("range_fixed_max") is not None:
-        cmd.extend(["--range-fixed-max", str(cfg["range_fixed_max"])])
+    append_range_args(cmd, cfg)
     return cmd
 
 
@@ -163,24 +173,11 @@ def build_reconstruct_cmd(cfg: dict[str, Any], input_nii: Path, case: str) -> li
         "--manifest",
         str(manifest),
         "--intensity-scale",
-        str(cfg.get("intensity_scale", "founddiff-hu")),
+        str(cfg.get("intensity_scale", "preserve-original")),
         "--intensity-match",
         str(cfg.get("intensity_match", "none")),
-        "--range-source",
-        str(cfg.get("range_source", "slice")),
-        "--range-stats-min",
-        str(cfg.get("range_stats_min", -2000.0)),
-        "--range-stats-max",
-        str(cfg.get("range_stats_max", 2000.0)),
-        "--range-ignore-at-or-below",
-        str(cfg.get("range_ignore_at_or_below", -2500.0)),
     ]
-    if cfg.get("range_percentile"):
-        cmd.extend(["--range-percentile", str(cfg["range_percentile"])])
-    if cfg.get("range_fixed_min") is not None:
-        cmd.extend(["--range-fixed-min", str(cfg["range_fixed_min"])])
-    if cfg.get("range_fixed_max") is not None:
-        cmd.extend(["--range-fixed-max", str(cfg["range_fixed_max"])])
+    append_range_args(cmd, cfg)
     return cmd
 
 

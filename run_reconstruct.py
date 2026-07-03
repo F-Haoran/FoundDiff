@@ -35,7 +35,7 @@ def main():
         "--volume-name",
         case,
         "--intensity-scale",
-        "founddiff-hu",
+        "preserve-original",
         "--intensity-match",
         "none",
     ]

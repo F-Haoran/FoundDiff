@@ -49,14 +49,14 @@ def parse_args():
     p.add_argument("--prefix", default="lung", help="Slice filename prefix")
     p.add_argument(
         "--intensity-scale",
-        choices=("founddiff-hu", "preserve-original", "slice-range", "identity", "unit"),
-        default="founddiff-hu",
+        choices=("preserve-original", "founddiff-hu", "slice-range", "identity", "unit"),
+        default="preserve-original",
         help=(
             "How to convert FoundDiff [0,1] npy values before embedding. "
-            "founddiff-hu (default) inverts PDFDataset Normalize: HU = norm*3000+24 — "
-            "matches model input space so output intensity stays close to the original. "
-            "preserve-original is an alias for founddiff-hu. "
-            "slice-range uses per-slice min/max (legacy; inconsistent with model norm)."
+            "preserve-original (default): apply only the model's norm delta in HU space "
+            "(HU_out = HU_orig + 3000*(norm_out-norm_in); exact when model is identity). "
+            "founddiff-hu: replace with norm*3000+24 (clips negatives to ~24). "
+            "slice-range: legacy per-slice linear map (inconsistent with model norm)."
         ),
     )
     p.add_argument(
@@ -78,17 +78,20 @@ def parse_args():
     p.add_argument(
         "--range-stats-min",
         type=float,
-        default=-2000.0,
+        default=None,
         help=(
-            "When estimating slice-range, ignore reference voxels below this value. "
-            "Useful to exclude air/mask padding around -3000."
+            "When estimating intensity bounds, ignore reference voxels below this value. "
+            "Default: no lower clip (only --range-ignore-at-or-below applies)."
         ),
     )
     p.add_argument(
         "--range-stats-max",
         type=float,
-        default=2000.0,
-        help="When estimating slice-range, ignore reference voxels above this value.",
+        default=None,
+        help=(
+            "When estimating intensity bounds, ignore reference voxels above this value. "
+            "Default: no upper clip."
+        ),
     )
     p.add_argument(
         "--range-percentile",
@@ -346,8 +349,10 @@ def scale_model_output(
     if arr.ndim != 2:
         raise SystemExit(f"Expected a 2D denoised slice, got shape {arr.shape}")
 
-    if scale in {"founddiff-hu", "preserve-original"}:
+    if scale == "founddiff-hu":
         return denorm_to_hu(arr)
+    if scale == "preserve-original":
+        raise SystemExit("preserve-original is handled in embed_denoised(), not scale_model_output()")
     if scale == "slice-range":
         sy, sx = crop["src_y"], crop["src_x"]
         sh, sw = crop["sh"], crop["sw"]
@@ -367,6 +372,44 @@ def scale_model_output(
     raise SystemExit(f"Unsupported --intensity-scale: {scale}")
 
 
+def hu_delta_from_norm_delta(norm_out: np.ndarray, norm_in: np.ndarray) -> np.ndarray:
+    """Apply FoundDiff denorm to the norm change only (preserves sub-24 HU on identity)."""
+    return (np.clip(norm_out, 0.0, 1.0) - np.clip(norm_in, 0.0, 1.0)) * np.float32(3000.0)
+
+
+def preserve_original_intensity(
+    norm_out512: np.ndarray,
+    original_slice: np.ndarray,
+    crop: dict[str, int],
+) -> np.ndarray:
+    """
+    HU_out = HU_orig + 3000*(norm_out - norm_in).
+
+    If the model returns the same norm as the input, HU_out equals HU_orig exactly
+    (including negative HU such as -2048). Only the denoising delta is applied.
+    """
+    sy, sx, dy, dx = crop["src_y"], crop["src_x"], crop["dst_y"], crop["dst_x"]
+    sh, sw = crop["sh"], crop["sw"]
+    roi_orig = original_slice[sy : sy + sh, sx : sx + sw].astype(np.float32, copy=False)
+    roi_norm_out = norm_out512[dy : dy + sh, dx : dx + sw]
+    norm_in = (roi_orig - np.float32(24.0)) / np.float32(3000.0)
+    roi_out = roi_orig + hu_delta_from_norm_delta(roi_norm_out, norm_in)
+    out = norm_out512.astype(np.float32, copy=True)
+    out[dy : dy + sh, dx : dx + sw] = roi_out
+    return out
+
+
+def resolve_reconstruction_options(
+    intensity_scale: str,
+    intensity_match: str,
+    range_opts: RangeOptions,
+) -> tuple[str, str, RangeOptions]:
+    """preserve-original uses HU residual correction; skip extra minmax unless requested."""
+    if intensity_scale == "preserve-original" and intensity_match == "none":
+        return intensity_scale, "none", range_opts
+    return intensity_scale, intensity_match, range_opts
+
+
 def embed_denoised(
     slice_values: np.ndarray,
     denoised_norm: np.ndarray,
@@ -377,20 +420,30 @@ def embed_denoised(
 ) -> np.ndarray:
     h, w = slice_values.shape
     crop = center_crop_box(h, w)
-    denoised512 = scale_model_output(
-        denoised_norm,
-        intensity_scale,
-        slice_values,
-        crop,
-        range_opts=range_opts,
+    intensity_scale, intensity_match, range_opts = resolve_reconstruction_options(
+        intensity_scale, intensity_match, range_opts
     )
-    denoised512 = match_intensity_to_original(
-        denoised512,
-        slice_values,
-        crop,
-        intensity_match,
-        range_opts=range_opts,
-    )
+    arr = np.squeeze(denoised_norm).astype(np.float32)
+    if arr.ndim != 2:
+        raise SystemExit(f"Expected a 2D denoised slice, got shape {arr.shape}")
+
+    if intensity_scale == "preserve-original":
+        denoised512 = preserve_original_intensity(arr, slice_values, crop)
+    else:
+        denoised512 = scale_model_output(
+            arr,
+            intensity_scale,
+            slice_values,
+            crop,
+            range_opts=range_opts,
+        )
+        denoised512 = match_intensity_to_original(
+            denoised512,
+            slice_values,
+            crop,
+            intensity_match,
+            range_opts=range_opts,
+        )
 
     out = slice_values.copy()
     sy, sx, dy, dx = crop["src_y"], crop["src_x"], crop["dst_y"], crop["dst_x"]
