@@ -9,5 +9,5 @@ pip install -r requirements-founddiff-pip.txt
 pip install git+https://github.com/openai/CLIP.git
 
 conda install -y -c nvidia cuda-nvcc=12.8
-export TORCH_CUDA_ARCH_LIST="12.0"   # RTX 5060；其它 GPU 改架构
+export TORCH_CUDA_ARCH_LIST="12.0"   # RTX 5060; change for other GPUs
 pip install causal-conv1d>=1.2.0 mamba-ssm --no-build-isolation

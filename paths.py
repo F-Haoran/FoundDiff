@@ -21,7 +21,7 @@ CQ500 = os.path.join(MAYO_DATA_ROOT, 'CQ500_2d')
 EXTERNAL_CT = os.path.join(_PROJECT_ROOT, 'data', 'external', 'external_2d')
 EXTERNAL_NIFTI = os.path.join(_PROJECT_ROOT, 'data', 'external', 'nifti')
 
-# Custom dataset: {CODE}_LDCT.nii.gz + {CODE}_CT.nii.gz
+# Custom dataset: {CODE}_CT.nii.gz (noisy input) or {CODE}_LDCT.nii.gz (Mayo-style)
 CUSTOM_NIFTI = os.path.join(_PROJECT_ROOT, 'data', 'custom', 'nifti')
 CUSTOM_2D = os.path.join(_PROJECT_ROOT, 'data', 'custom', 'custom_2d')
 

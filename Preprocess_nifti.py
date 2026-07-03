@@ -51,7 +51,7 @@ def parse_args():
 def load_nifti_hu(path: Path) -> np.ndarray:
     import nibabel as nib
 
-    vol = np.asarray(nib.load(str(path)).dataobj, dtype=np.float32)
+    vol = np.asarray(nib.load(str(path)).get_fdata(), dtype=np.float32)
     if vol.ndim == 3:
         vol = np.transpose(vol, (2, 1, 0))
     return vol
@@ -104,6 +104,7 @@ def main():
     total = 0
     bootstrap_slices = []
     manifest = {"stride": args.stride, "max_slices": args.max_slices, "volumes": []}
+    global_slice_idx = 0
 
     for name, full_path, low_path in pairs:
         phase = "test" if name in test_names else "train"
@@ -125,7 +126,8 @@ def main():
 
         slice_idx = 0
         for z in range(0, n, args.stride):
-            fname = f"lung-{slice_idx:05d}.npy"
+            fname = f"lung-{global_slice_idx:05d}.npy"
+            global_slice_idx += 1
             slice_idx += 1
             full_sl = crop512(full_vol[z])
             low_sl = crop512(low_vol[z])
@@ -156,3 +158,7 @@ def main():
         json.dump(manifest, f, indent=2)
     print(f"Manifest: {manifest_path}")
     print(f"Wrote {total} npy files under {args.out_root}")
+
+
+if __name__ == "__main__":
+    main()

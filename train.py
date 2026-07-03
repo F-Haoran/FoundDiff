@@ -30,22 +30,22 @@ debug = False
 
 
 
-parser = argparse.ArgumentParser(description="一个简单的命令行参数示例")
+parser = argparse.ArgumentParser(description="FoundDiff training and inference")
 
-# 添加参数
-parser.add_argument('--name', type=str, required=True, help='输入文件路径')
-parser.add_argument('--is_train', action='store_true', help='is_train')
-parser.add_argument('--verbose', action='store_true', help='是否打印详细信息')
-parser.add_argument('--sampling_timesteps', type=int, default=2, help='采样的时间步数')
-parser.add_argument('--epoch', type=int, default=100, help='采样的时间步数')
-parser.add_argument('--dataset', type=str, default='2020_seen', help='输入文件路径')
+# CLI arguments
+parser.add_argument('--name', type=str, required=True, help='Experiment / checkpoint name')
+parser.add_argument('--is_train', action='store_true', help='Run training instead of inference')
+parser.add_argument('--verbose', action='store_true', help='Print verbose logs')
+parser.add_argument('--sampling_timesteps', type=int, default=2, help='Number of diffusion sampling steps')
+parser.add_argument('--epoch', type=int, default=100, help='Checkpoint epoch to load for inference')
+parser.add_argument('--dataset', type=str, default='2020_seen', help='Dataset split (e.g. 2020_seen)')
 parser.add_argument('--data-mode', type=str, default='idc', choices=['author', 'idc', 'external'],
                     help='author=head sim-0.10; idc=lung+ab quarter_1mm; external=open nii.gz pairs')
 parser.add_argument('--max-test', type=int, default=0,
                     help='Limit test slices (0=all). Useful for external/quick runs.')
 parser.add_argument('--train_num_steps', type=int, default=200000, help='train_num_steps')
 parser.add_argument('--train_batch_size', type=int, default=2, help='train_batch_size')
-# 解析命令行参数
+# Parse CLI arguments
 opt = parser.parse_args()
 
 

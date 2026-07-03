@@ -1,0 +1,93 @@
+# FoundDiff environment requirements (GPU inference + custom NIfTI test pipeline)
+#
+# Python: 3.10.x recommended (tested with 3.10.20)
+# OS:     Linux + NVIDIA GPU + CUDA driver
+#
+# =============================================================================
+# INSTALL ORDER (run these commands in order; do NOT pip install -r blindly)
+# =============================================================================
+#
+# 1) Create conda env
+#    conda create -n FoundDiff python=3.10.20 -y
+#    conda activate FoundDiff
+#
+# 2) Install PyTorch GPU (pick ONE index for your GPU)
+#    RTX 50 series (sm_120): cu128
+#    pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
+#      --index-url https://download.pytorch.org/whl/cu128
+#
+#    RTX 30/40 series: often cu121 or cu124, e.g.
+#    pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
+#      --index-url https://download.pytorch.org/whl/cu124
+#
+# 3) Install this file (core Python deps)
+#    pip install -r requirements.txt
+#
+# 4) Install OpenAI CLIP (required by model code)
+#    pip install git+https://github.com/openai/CLIP.git
+#
+# 5) Install nvcc for Mamba compile (conda, not pip)
+#    conda install -y -c nvidia cuda-nvcc=12.8
+#
+# 6) Compile and install Mamba (GPU-specific; adjust arch)
+#    export CUDA_HOME="$CONDA_PREFIX"
+#    export PATH="$CONDA_PREFIX/bin:$PATH"
+#    export TORCH_CUDA_ARCH_LIST="12.0"    # RTX 5090/5060; use 8.6 for RTX 3090
+#    pip install ninja packaging
+#    pip install "causal-conv1d>=1.2.0" --no-build-isolation
+#    pip install mamba-ssm --no-build-isolation
+#
+# 7) Re-pin PyTorch if mamba upgraded it
+#    pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
+#      --index-url https://download.pytorch.org/whl/cu128
+#
+# 8) Download model weights (not via pip)
+#    src/DA-CLIP.pth
+#    checkpoints/FoundDiff/sample/model-400.pt
+#    Google Drive: https://drive.google.com/drive/folders/1B33XyPqC9KkmzmfrCq20-7Xxuf-23PMc
+#
+# 9) Verify
+#    python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+#    python -c "import selective_scan_cuda; print('mamba OK')"
+#
+# NOTE: torch / torchvision / torchaudio are NOT listed below (install separately, step 2).
+# NOTE: mamba-ssm / causal-conv1d are NOT listed below (compile install, step 6).
+# NOTE: clip is NOT listed below (git install, step 4).
+
+# --- deep learning utilities ---
+accelerate==1.14.0
+einops==0.8.2
+ema-pytorch==0.7.9
+kornia==0.6.12
+lpips==0.1.4
+timm==1.0.27
+open_clip_torch==3.3.0
+transformers>=5.11.0
+
+# --- numerics / image ---
+numpy>=2.0,<2.3
+scipy==1.15.3
+PyWavelets>=1.8.0
+scikit-image==0.25.2
+opencv-python==4.13.0.92
+pillow>=12.0.0
+matplotlib==3.10.9
+tifffile>=2025.5.10
+ImageIO>=2.37.0
+
+# --- medical imaging I/O ---
+nibabel==5.4.2
+pydicom==3.0.2
+SimpleITK>=2.5.0
+
+# --- training / data helpers used by src/DADiff.py ---
+Augmentor==0.2.12
+tqdm>=4.68.0
+pandas>=2.2.0
+
+# --- debugging (optional but imported by codebase) ---
+ipdb==0.13.13
+
+# --- build helpers for mamba (also install before step 6) ---
+ninja>=1.13.0
+packaging>=26.0

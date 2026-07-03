@@ -49,8 +49,8 @@ class Mayo16Dataset(Dataset):
             self.f_path_list=sorted_list(mayo_glob(MAYO2016, 'test', 'full_1mm'))
             # self.f_path_list = sorted_list('/mnt/miah203/zhchen/CQ500_2d/test/full_1mm/*')
             # self.q_path_list = sorted_list('/mnt/miah203/zhchen/CQ500_2d/test/sim-0.25/*')
-            #self.q_path_list=sorted_list('/mnt/miah203/zhchen/肺科医院/ldct_npy_2d/*')[:2000:2]
-            #self.f_path_list=sorted_list('/mnt/miah203/zhchen/肺科医院/ldct_npy_2d/*')[:2000:2]
+            #self.q_path_list=sorted_list('/mnt/miah203/zhchen/hospital_ldct_npy_2d/*')[:2000:2]
+            #self.f_path_list=sorted_list('/mnt/miah203/zhchen/hospital_ldct_npy_2d/*')[:2000:2]
 
         self.A_size = len(self.q_path_list)  # get the size of dataset A
         self.B_size = len(self.f_path_list)

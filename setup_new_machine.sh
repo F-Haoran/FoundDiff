@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# FoundDiff 新机器环境安装（需联网）。用法: bash setup_new_machine.sh
+# FoundDiff setup on a new machine (requires network). Usage: bash setup_new_machine.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
@@ -61,5 +61,5 @@ PY
 echo ""
 echo "Next:"
 echo "  1) Put src/DA-CLIP.pth and checkpoints/FoundDiff/sample/model-400.pt"
-echo "  2) Put nii.gz in data/custom/nifti/  (exp001_LDCT.nii.gz + exp001_CT.nii.gz)"
+echo "  2) Put nii.gz in data/custom/nifti/  (e.g. case001_CT.nii.gz or case001_LDCT.nii.gz)"
 echo "  3) bash run_custom_nifti.sh"
