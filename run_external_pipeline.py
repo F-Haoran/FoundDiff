@@ -82,15 +82,21 @@ def parse_args():
     )
     p.add_argument(
         "--intensity-scale",
-        choices=("slice-range", "founddiff-hu", "identity", "unit"),
-        default="slice-range",
-        help="Passed to reconstruct_denoised_nifti.py (default: slice-range).",
+        choices=("founddiff-hu", "preserve-original", "slice-range", "identity", "unit"),
+        default="founddiff-hu",
+        help=(
+            "Passed to reconstruct_denoised_nifti.py (default: founddiff-hu). "
+            "Use founddiff-hu so output HU matches the original FoundDiff input mapping."
+        ),
     )
     p.add_argument(
         "--intensity-match",
         choices=("minmax", "mean-ratio", "none"),
-        default="minmax",
-        help="Passed to reconstruct_denoised_nifti.py (default: minmax).",
+        default="none",
+        help=(
+            "Passed to reconstruct_denoised_nifti.py (default: none). "
+            "Use minmax only if denoised contrast drifts from the original."
+        ),
     )
     p.add_argument(
         "--range-source",

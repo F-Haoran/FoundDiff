@@ -49,11 +49,14 @@ def parse_args():
     p.add_argument("--prefix", default="lung", help="Slice filename prefix")
     p.add_argument(
         "--intensity-scale",
-        choices=("slice-range", "founddiff-hu", "identity", "unit"),
-        default="slice-range",
+        choices=("founddiff-hu", "preserve-original", "slice-range", "identity", "unit"),
+        default="founddiff-hu",
         help=(
             "How to convert FoundDiff [0,1] npy values before embedding. "
-            "slice-range maps each slice back to the original intensity range."
+            "founddiff-hu (default) inverts PDFDataset Normalize: HU = norm*3000+24 — "
+            "matches model input space so output intensity stays close to the original. "
+            "preserve-original is an alias for founddiff-hu. "
+            "slice-range uses per-slice min/max (legacy; inconsistent with model norm)."
         ),
     )
     p.add_argument(
@@ -65,8 +68,12 @@ def parse_args():
     p.add_argument(
         "--intensity-match",
         choices=("minmax", "mean-ratio", "none"),
-        default="minmax",
-        help="Optional post-scale ROI intensity match against the original slice.",
+        default="none",
+        help=(
+            "Optional post-scale ROI intensity match against the original slice. "
+            "none (default with founddiff-hu) keeps FoundDiff HU inverse; "
+            "minmax stretches ROI to filtered original min/max; mean-ratio matches mean."
+        ),
     )
     p.add_argument(
         "--range-stats-min",
@@ -309,9 +316,12 @@ def match_intensity_to_original(
 
     if range_opts is not None:
         original_bounds = reference_intensity_bounds(original_roi, range_opts)
+        denoised_bounds = reference_intensity_bounds(denoised_roi, range_opts)
+        if denoised_bounds is None:
+            denoised_bounds = finite_min_max(denoised_roi)
     else:
         original_bounds = finite_min_max(original_roi)
-    denoised_bounds = finite_min_max(denoised_roi)
+        denoised_bounds = finite_min_max(denoised_roi)
     if original_bounds is None or denoised_bounds is None:
         return denoised512
     original_min, original_max = original_bounds
@@ -336,6 +346,8 @@ def scale_model_output(
     if arr.ndim != 2:
         raise SystemExit(f"Expected a 2D denoised slice, got shape {arr.shape}")
 
+    if scale in {"founddiff-hu", "preserve-original"}:
+        return denorm_to_hu(arr)
     if scale == "slice-range":
         sy, sx = crop["src_y"], crop["src_x"]
         sh, sw = crop["sh"], crop["sw"]
@@ -348,8 +360,6 @@ def scale_model_output(
         if not np.isfinite(src_min) or not np.isfinite(src_max) or src_max <= src_min:
             return np.full_like(arr, src_min if np.isfinite(src_min) else 0.0)
         return np.clip(arr, 0.0, 1.0) * (src_max - src_min) + src_min
-    if scale == "founddiff-hu":
-        return denorm_to_hu(arr)
     if scale == "unit":
         return arr
     if scale == "identity":
