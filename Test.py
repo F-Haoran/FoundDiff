@@ -30,7 +30,6 @@ from ema_pytorch import EMA
 from tqdm import tqdm
 
 from nifti_naming import NAMING_CT, collect_input_files, infer_case_name
-from reconstruct_denoised_nifti import center_crop_box, preserve_original_intensity
 from src.DADiff import ResidualDiffusion, UnetRes, set_seed
 
 ROOT = Path(__file__).resolve().parent
@@ -78,6 +77,36 @@ def hu_to_norm_01(hu: np.ndarray) -> np.ndarray:
     m = hu.astype(np.float32) - np.float32(HU_OFFSET)
     norm = (m - np.float32(HU_MIN)) / np.float32(HU_MAX - HU_MIN)
     return np.clip(norm, 0.0, 1.0).astype(np.float32)
+
+
+def center_crop_box(h: int, w: int, *, roi_h: int = 512, roi_w: int = 512) -> dict[str, int]:
+    sh, sw = min(h, roi_h), min(w, roi_w)
+    dst_y = max((roi_h - sh) // 2, 0)
+    dst_x = max((roi_w - sw) // 2, 0)
+    src_y = max((h - sh) // 2, 0)
+    src_x = max((w - sw) // 2, 0)
+    return {"src_y": src_y, "src_x": src_x, "dst_y": dst_y, "dst_x": dst_x, "sh": sh, "sw": sw}
+
+
+def hu_delta_from_norm_delta(norm_out: np.ndarray, norm_in: np.ndarray) -> np.ndarray:
+    return (np.clip(norm_out, 0.0, 1.0) - np.clip(norm_in, 0.0, 1.0)) * np.float32(3000.0)
+
+
+def preserve_original_intensity(
+    norm_out512: np.ndarray,
+    original_slice: np.ndarray,
+    crop: dict[str, int],
+) -> np.ndarray:
+    """HU_out = HU_orig + 3000*(norm_out - norm_in); preserves negative HU on near-identity runs."""
+    sy, sx, dy, dx = crop["src_y"], crop["src_x"], crop["dst_y"], crop["dst_x"]
+    sh, sw = crop["sh"], crop["sw"]
+    roi_orig = original_slice[sy : sy + sh, sx : sx + sw].astype(np.float32, copy=False)
+    roi_norm_out = norm_out512[dy : dy + sh, dx : dx + sw]
+    norm_in = (roi_orig - np.float32(24.0)) / np.float32(3000.0)
+    roi_out = roi_orig + hu_delta_from_norm_delta(roi_norm_out, norm_in)
+    out = norm_out512.astype(np.float32, copy=True)
+    out[dy : dy + sh, dx : dx + sw] = roi_out
+    return out
 
 
 def center_crop_pad_512(slice2d: np.ndarray, fill: float = float(HU_MIN)) -> np.ndarray:
