@@ -27,8 +27,8 @@ from pathlib import Path
 import numpy as np
 import torch
 from ema_pytorch import EMA
+from PIL import Image
 from torch.utils.data import DataLoader, Dataset
-from torchvision import utils
 
 from src.DADiff import ResidualDiffusion, UnetRes, set_seed
 
