@@ -35,40 +35,31 @@ ROOT = Path(__file__).resolve().parent
 
 
 def config() -> dict[str, Any]:
-    """Edit paths and options here, then run: python run_one_nifti.py"""
+    """Edit USER_PATHS below, then run: python Test.py"""
 
     root = Path("/home/FrankFei/FoundDiff")
 
-    return {
-        # ----- input discovery -----
-        # Set input_path to ONE file OR a folder:
-        #   file:   .../APNHC00002_CT.nii.gz
-        #   folder: .../data/custom/nifti
-        "input_path": root / "data/custom/nifti",
-        # Glob pattern when input_path is a folder (fnmatch on filename):
-        #   "*_CT.nii.gz" | "APNHC*.nii.gz" | "*.nii.gz"
-        "pattern": "*_CT.nii.gz",
-        # ct | ldct | any — suffix-based filter after glob (see nifti_naming.py)
-        "naming": "ct",
-        # folder mode: False = first match only; True = all matches
-        "process_all": False,
-        # optional per-file case override; None = infer from filename
-        "case_name": None,
-        # strip suffixes from stem when inferring case; empty () keeps full stem (APNHC00002_CT)
-        "case_strip_suffixes": (),
-        "overwrite": False,
-
-        # ----- output -----
+    # ========== USER_PATHS — only edit these ==========
+    USER_PATHS = {
+        "input_dir": root / "data/custom/nifti",
         "output_dir": root / "checkpoints/FoundDiff/custom_denoised_files",
+        "weights": root / "checkpoints/FoundDiff/sample/model-400.pt",
+        "daclip": root / "src/DA-CLIP.pth",
+    }
+    # ================================================
+
+    return {
+        "input_path": USER_PATHS["input_dir"],
+        "pattern": "*_CT.nii.gz",
+        "naming": NAMING_CT,
+        "process_all": True,
+        "case_name": None,
+        "case_strip_suffixes": (),
+        "overwrite": True,
+        "output_dir": USER_PATHS["output_dir"],
         "output_suffix": "_denoised",
-
-        # ----- run mode -----
-        # quick | full | reconstruct_only
-        "mode": "quick",
+        "mode": "full",
         "gpu": "0",
-
-        # ----- intensity mapping (reconstruction) -----
-        # preserve-original: founddiff-hu + per-slice minmax to match input HU range.
         "intensity_scale": "preserve-original",
         "intensity_match": "none",
         "range_source": "slice",
@@ -78,10 +69,10 @@ def config() -> dict[str, Any]:
         "range_percentile": None,
         "range_fixed_min": None,
         "range_fixed_max": None,
-
-        # ----- internal paths (usually unchanged) -----
         "manifest": root / "data/external/external_2d/slice_manifest.json",
         "denoised_dir": root / "checkpoints/FoundDiff/test_final_npy",
+        "_weights": USER_PATHS["weights"],
+        "_daclip": USER_PATHS["daclip"],
     }
 
 

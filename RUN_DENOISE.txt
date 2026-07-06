@@ -1,0 +1,34 @@
+FoundDiff — simplest run (paths only)
+
+1) Edit USER_PATHS in run_one_nifti.py (3 paths):
+   - input_dir   -> your *_CT.nii.gz folder
+   - output_dir  -> where denoised .nii.gz go
+   - weights / daclip (usually unchanged)
+
+2) One command:
+
+   cd /home/FrankFei/FoundDiff
+   conda activate FoundDiff
+   python Test.py
+
+   First time smoke test:
+   python Test.py --mode quick
+
+   All 18 cases, all slices:
+   python Test.py --mode full --process-all
+
+3) What it runs (real GPU inference):
+   run_external_pipeline.py
+     -> Preprocess_nifti.py
+     -> train.py  (loads model-400.pt + DA-CLIP, DDIM 2 steps)
+     -> reconstruct_denoised_nifti.py
+
+4) Output:
+   checkpoints/FoundDiff/custom_denoised_files/APNHC00002_CT_denoised.nii.gz
+
+5) Single file without editing config:
+
+   python run_external_pipeline.py \
+     data/custom/nifti/APNHC00002_CT.nii.gz \
+     APNHC00002_CT full \
+     --output-dir checkpoints/FoundDiff/custom_denoised_files
