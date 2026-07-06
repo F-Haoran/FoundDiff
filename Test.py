@@ -234,7 +234,7 @@ def ddim_denoise_slice(
     """
     ldct_norm_01 = ldct_norm_01.to(torch_device_of(model))
     e_dose, e_anatomy = extract_daclip_embeddings(unet, ldct_norm_01)
-    samples = model.sample(ldct_norm_01, batch_size=ldct_norm_01.shape[0], last=True)
+    samples = model.sample([ldct_norm_01], batch_size=ldct_norm_01.shape[0], last=True)
     norm_out = samples[-1].clamp(0.0, 1.0)
     return norm_out, e_dose, e_anatomy
 

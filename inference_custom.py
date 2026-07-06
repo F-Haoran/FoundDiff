@@ -282,7 +282,7 @@ def ddim_denoise_batch(model: ResidualDiffusion, ldct_norm_01: torch.Tensor) -> 
     and returns clean estimate x_start = ldct - pred_res in [-1, 1], then mapped to [0, 1].
     """
     x_cond = ldct_norm_01.to(torch_device_of(model))
-    samples = model.sample(x_cond, batch_size=x_cond.shape[0], last=True)
+    samples = model.sample([x_cond], batch_size=x_cond.shape[0], last=True)
     return samples[-1].clamp(0.0, 1.0)
 
 
