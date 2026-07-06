@@ -68,7 +68,7 @@ def config() -> dict[str, Any]:
 # HU / tensor helpers
 # ---------------------------------------------------------------------------
 
-def clip_hu(hu: np.ndarray) -> np.ndarray:
+def clip_hu_to_window(hu: np.ndarray) -> np.ndarray:
     return np.clip(hu.astype(np.float32), HU_MIN, HU_MAX)
 
 
@@ -243,7 +243,7 @@ def denoise_hu_slice(
     clip_hu: bool,
 ) -> np.ndarray:
     """Run FoundDiff on one full-resolution 2D HU slice; return denoised HU slice."""
-    original = clip_hu(slice_hu) if clip_hu else slice_hu.astype(np.float32)
+    original = clip_hu_to_window(slice_hu) if clip_hu else slice_hu.astype(np.float32)
     hu512 = center_crop_pad_512(original, fill=float(HU_MIN))
     norm_in = hu_to_norm_01(hu512)
 
@@ -270,7 +270,7 @@ def denoise_hu_batch_slices(
     clip_hu: bool,
 ) -> list[np.ndarray]:
     """Batch version when all slices share 512x512 after crop (same H,W)."""
-    originals = [clip_hu(s) if clip_hu else s.astype(np.float32) for s in slices_hu]
+    originals = [clip_hu_to_window(s) if clip_hu else s.astype(np.float32) for s in slices_hu]
     hu512_list = [center_crop_pad_512(s, fill=float(HU_MIN)) for s in originals]
     norms = np.stack([hu_to_norm_01(x) for x in hu512_list], axis=0)
     ldct = torch.from_numpy(norms).unsqueeze(1).to(model.device)  # [B,1,512,512]
