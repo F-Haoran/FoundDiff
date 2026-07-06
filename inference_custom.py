@@ -33,8 +33,8 @@ from torchvision import utils
 from src.DADiff import ResidualDiffusion, UnetRes, set_seed
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_DATA = ROOT / "my_custom_data"
-DEFAULT_OUTPUT = ROOT / "output_denoised"
+DEFAULT_DATA = ROOT / "data" / "custom" / "nifti"
+DEFAULT_OUTPUT = ROOT / "checkpoints" / "FoundDiff" / "custom_denoised_files"
 DEFAULT_CKPT = ROOT / "checkpoints" / "FoundDiff" / "sample" / "model-400.pt"
 DACLIP_PATH = ROOT / "src" / "DA-CLIP.pth"
 
