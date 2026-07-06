@@ -173,6 +173,10 @@ def build_founddiff(sampling_timesteps: int) -> ResidualDiffusion:
     )
 
 
+def torch_device_of(module: torch.nn.Module) -> torch.device:
+    return next(module.parameters()).device
+
+
 def load_founddiff_ema(checkpoint: Path, sampling_steps: int, device: torch.device) -> ResidualDiffusion:
     if not DACLIP_PATH.is_file():
         raise FileNotFoundError(f"Missing DA-CLIP weights: {DACLIP_PATH}")
@@ -228,7 +232,7 @@ def ddim_denoise_slice(
     Returns:
         norm_out [B,1,H,W] in [0,1], e_dose, e_anatomy
     """
-    ldct_norm_01 = ldct_norm_01.to(model.device)
+    ldct_norm_01 = ldct_norm_01.to(torch_device_of(model))
     e_dose, e_anatomy = extract_daclip_embeddings(unet, ldct_norm_01)
     samples = model.sample(ldct_norm_01, batch_size=ldct_norm_01.shape[0], last=True)
     norm_out = samples[-1].clamp(0.0, 1.0)
@@ -247,7 +251,7 @@ def denoise_hu_slice(
     hu512 = center_crop_pad_512(original, fill=float(HU_MIN))
     norm_in = hu_to_norm_01(hu512)
 
-    ldct = torch.from_numpy(norm_in).unsqueeze(0).unsqueeze(0).to(model.device)  # [1,1,512,512]
+    ldct = torch.from_numpy(norm_in).unsqueeze(0).unsqueeze(0).to(torch_device_of(model))
     norm_out, _, _ = ddim_denoise_slice(model, unet, ldct)
     norm_out_np = norm_out[0, 0].detach().cpu().numpy().astype(np.float32)
 
@@ -273,7 +277,7 @@ def denoise_hu_batch_slices(
     originals = [clip_hu_to_window(s) if clip_hu else s.astype(np.float32) for s in slices_hu]
     hu512_list = [center_crop_pad_512(s, fill=float(HU_MIN)) for s in originals]
     norms = np.stack([hu_to_norm_01(x) for x in hu512_list], axis=0)
-    ldct = torch.from_numpy(norms).unsqueeze(1).to(model.device)  # [B,1,512,512]
+    ldct = torch.from_numpy(norms).unsqueeze(1).to(torch_device_of(model))
 
     norm_out, _, _ = ddim_denoise_slice(model, unet, ldct)
     norm_out_np = norm_out[:, 0].detach().cpu().numpy()

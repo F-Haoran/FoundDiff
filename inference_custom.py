@@ -269,6 +269,10 @@ def extract_daclip_embeddings(unet: UnetRes, ldct_norm_01: torch.Tensor) -> tupl
     return e_dose, e_anatomy
 
 
+def torch_device_of(module: torch.nn.Module) -> torch.device:
+    return next(module.parameters()).device
+
+
 @torch.no_grad()
 def ddim_denoise_batch(model: ResidualDiffusion, ldct_norm_01: torch.Tensor) -> torch.Tensor:
     """
@@ -277,7 +281,7 @@ def ddim_denoise_batch(model: ResidualDiffusion, ldct_norm_01: torch.Tensor) -> 
     Internally Unet concatenates (x_t, ldct), runs DA-CLIP on ldct, predicts pred_res,
     and returns clean estimate x_start = ldct - pred_res in [-1, 1], then mapped to [0, 1].
     """
-    x_cond = ldct_norm_01.to(model.device)
+    x_cond = ldct_norm_01.to(torch_device_of(model))
     samples = model.sample(x_cond, batch_size=x_cond.shape[0], last=True)
     return samples[-1].clamp(0.0, 1.0)
 
@@ -302,9 +306,9 @@ def save_outputs(
         if save_hu_npy:
             np.save(output_dir / f"{safe}_denoised_hu.npy", hu_denoised.astype(np.float32))
 
-        # PNG preview: window [-1000, 2000] HU -> 0..1 for display
+        # PNG preview: window [-1000, 2000] HU -> 0..255
         preview = np.clip((hu_denoised - HU_MIN) / (HU_MAX - HU_MIN), 0.0, 1.0)
-        utils.save_image(torch.from_numpy(preview).unsqueeze(0), str(output_dir / f"{safe}_denoised.png"))
+        Image.fromarray((preview * 255.0).astype(np.uint8), mode="L").save(output_dir / f"{safe}_denoised.png")
 
 
 def main() -> int:
