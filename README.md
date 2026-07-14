@@ -37,7 +37,7 @@ Put DA-CLIP.pth in src/DA-Diff.py and model-400.pt in checkpoints/FoundDiff/samp
 ```
 CUDA_VISIBLE_DEVICES=4 python train.py --name FoundDiff --epoch 400 --dataset 2020_seen
 ```
-Please refer to options files for more setting.
+
 
 
 
@@ -46,6 +46,7 @@ Please refer to options files for more setting.
 
 **Step 0: Choose your working directory**
 Navigate to the root folder where you want to install the project.
+
 ```bash
 cd /path/to/RootOfYourInstallation
 
