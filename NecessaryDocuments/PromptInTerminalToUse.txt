@@ -1,0 +1,30 @@
+#Step 0: Pick a folder begin:
+cd RootOfYourInstallation
+#RootOfYourInstallation usually depend on prompt where you begin git clone 
+
+#Step 1: Github Clone FoundDiff
+git clone https://github.com/hao1635/FoundDiff.git
+cd FoundDiff
+
+#Step 2: Create an environment
+conda create -n FoundDiff python=3.7.9
+conda activate FoundDiff
+
+#Download ZIP file and extract it
+#Step 3: Put the All things in Necessary Documents into your folder
+mv RootToNecessaryDocuments/NecessaryDocument RootOfYourInstallation
+pip install -r requirements.txt
+
+#Step 4: Download official pretrained model from github:
+https://drive.google.com/drive/folders/1B33XyPqC9KkmzmfrCq20-7Xxuf-23PMc?usp=sharing
+#Upper link please paste it into Firefox/GoogleChrome, download them
+
+#Step 5: Put DA-CLIP.pth in src/DA-Diff.py and model-400.pt in checkpoints/FoundDiff/sample 
+
+
+#Step 6: run following prompt at root folder
+conda activate FoundDiff
+python denoise_folder.py \
+  --in_dir  data/mydata \
+  --out_dir data/Output \
+  --batch_size 4
