@@ -1,5 +1,5 @@
 ## Strongly Recommended read paper and github of official author first
-## Denoising for nii.gz files 
+## Denoising for nii.gz files by FoundDiff
 
 **Step 0: Choose your working directory**
 Navigate to the root folder where you want to install the project.
