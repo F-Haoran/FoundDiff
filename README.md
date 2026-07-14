@@ -41,39 +41,73 @@ Please refer to options files for more setting.
 
 
 
-#### .nii.gz denoising utility:
-## Step 0: Pick a folder begin:
-cd RootOfYourInstallation
+```markdown
+### `.nii.gz` Denoising Utility
 
-## Step 1: Github Clone FoundDiff
-'''git clone https://github.com/hao1635/FoundDiff.git /n
-cd FoundDiff'''
+**Step 0: Choose your working directory**
+Navigate to the root folder where you want to install the project.
+```bash
+cd /path/to/RootOfYourInstallation
 
-## Step 2: Create an environment
-'''conda create -n FoundDiff python=3.7.9
-conda activate FoundDiff'''
+```
 
-## Step 3: Download folder of Necessary Documents
-'''mv RootToNecessaryDocuments/NecessaryDocument RootOfYourInstallation 
-pip install -r requirements.txt'''
+**Step 1: Clone the FoundDiff repository**
+Clone the official GitHub repository and navigate into it.
 
-## Step 4: Download official pretrained model from github:
-https://drive.google.com/drive/folders/1B33XyPqC9KkmzmfrCq20-7Xxuf-23PMc?usp=sharing
+```bash
+git clone [https://github.com/hao1635/FoundDiff.git](https://github.com/hao1635/FoundDiff.git)
+cd FoundDiff
 
-## Step 5: Put DA-CLIP.pth in src/DA-Diff.py and model-400.pt in checkpoints/FoundDiff/sample 
+```
 
+**Step 2: Create and activate the Conda environment**
+Set up a dedicated Python environment to prevent dependency conflicts.
 
-## Step 6: run following prompt at root folder
-'''conda activate FoundDiff     
+```bash
+conda create -n FoundDiff python=3.7.9 -y
+conda activate FoundDiff
+
+```
+
+**Step 3: Move necessary documents and install dependencies**
+Move your required documents into the installation folder, then install the Python requirements.
+
+```bash
+mv /path/to/NecessaryDocuments /path/to/RootOfYourInstallation 
+pip install -r requirements.txt
+
+```
+
+**Step 4: Download the official pre-trained models**
+Download the required model weights from the official Google Drive link:
+🔗 [FoundDiff Pre-trained Models (Google Drive)](https://drive.google.com/drive/folders/1B33XyPqC9KkmzmfrCq20-7Xxuf-23PMc?usp=sharing)
+
+**Step 5: Place the model weights in the correct directories**
+Once downloaded, move the specific weight files to their corresponding folders:
+
+* Place `DA-CLIP.pth` into the `src/` directory.
+* Place `model-400.pt` into the `checkpoints/FoundDiff/sample/` directory.
+
+**Step 6: Run the denoising script**
+Ensure your environment is active, then run the batch inference script from the root folder.
+
+```bash
+conda activate FoundDiff     
 python denoise_folder.py \    
-  --in_dir  data/mydata \    
+  --in_dir data/mydata \    
   --out_dir data/Output \    
-  --batch_size 4'''
+  --batch_size 4
 
-#### Official website of FoundDiff: 
-https://github.com/hao1635/FoundDiff/blob/main/README.md
+```
 
-#### Official paper for FoundDiff: 
-'''FoundDiff: Foundational Diffusion Model for Generalizable Low-Dose CT Denoising[1].    
-[1]Z. Chen et al., “FoundDiff: Foundational Diffusion Model for Generalizable Low-Dose CT Denoising,” IEEE Transactions on Medical Imaging, pp. 1–1, 2026, doi: 10.1109/tmi.2026.3698474.'''
+---
+
+### References & Links
+
+* **Official Repository:** [FoundDiff on GitHub](https://github.com/hao1635/FoundDiff/blob/main/README.md)
+* **Official Paper:** > Z. Chen et al., *"FoundDiff: Foundational Diffusion Model for Generalizable Low-Dose CT Denoising,"* IEEE Transactions on Medical Imaging, pp. 1–1, 2026, doi: [10.1109/tmi.2026.3698474](https://www.google.com/search?q=https://doi.org/10.1109/tmi.2026.3698474).
+
+```
+
+```
 
