@@ -46,16 +46,16 @@ Please refer to options files for more setting.
 cd RootOfYourInstallation
 
 ## Step 1: Github Clone FoundDiff
-git clone https://github.com/hao1635/FoundDiff.git /n
-cd FoundDiff
+'''git clone https://github.com/hao1635/FoundDiff.git /n
+cd FoundDiff'''
 
 ## Step 2: Create an environment
-conda create -n FoundDiff python=3.7.9
-conda activate FoundDiff
+'''conda create -n FoundDiff python=3.7.9
+conda activate FoundDiff'''
 
 ## Step 3: Download folder of Necessary Documents
-mv RootToNecessaryDocuments/NecessaryDocument RootOfYourInstallation /n
-pip install -r requirements.txt
+'''mv RootToNecessaryDocuments/NecessaryDocument RootOfYourInstallation 
+pip install -r requirements.txt'''
 
 ## Step 4: Download official pretrained model from github:
 https://drive.google.com/drive/folders/1B33XyPqC9KkmzmfrCq20-7Xxuf-23PMc?usp=sharing
@@ -64,16 +64,16 @@ https://drive.google.com/drive/folders/1B33XyPqC9KkmzmfrCq20-7Xxuf-23PMc?usp=sha
 
 
 ## Step 6: run following prompt at root folder
-conda activate FoundDiff     /n
-python denoise_folder.py \    /n
-  --in_dir  data/mydata \    /n
-  --out_dir data/Output \    /n
-  --batch_size 4
+'''conda activate FoundDiff     
+python denoise_folder.py \    
+  --in_dir  data/mydata \    
+  --out_dir data/Output \    
+  --batch_size 4'''
 
 #### Official website of FoundDiff: 
 https://github.com/hao1635/FoundDiff/blob/main/README.md
 
 #### Official paper for FoundDiff: 
-FoundDiff: Foundational Diffusion Model for Generalizable Low-Dose CT Denoising[1].    /n
-[1]Z. Chen et al., “FoundDiff: Foundational Diffusion Model for Generalizable Low-Dose CT Denoising,” IEEE Transactions on Medical Imaging, pp. 1–1, 2026, doi: 10.1109/tmi.2026.3698474.
+'''FoundDiff: Foundational Diffusion Model for Generalizable Low-Dose CT Denoising[1].    
+[1]Z. Chen et al., “FoundDiff: Foundational Diffusion Model for Generalizable Low-Dose CT Denoising,” IEEE Transactions on Medical Imaging, pp. 1–1, 2026, doi: 10.1109/tmi.2026.3698474.'''
 
