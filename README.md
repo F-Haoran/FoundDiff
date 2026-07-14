@@ -41,8 +41,7 @@ CUDA_VISIBLE_DEVICES=4 python train.py --name FoundDiff --epoch 400 --dataset 20
 
 
 
-```markdown
-### `.nii.gz` Denoising Utility
+#### Denoising for nii.gz files
 
 **Step 0: Choose your working directory**
 Navigate to the root folder where you want to install the project.
